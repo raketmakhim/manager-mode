@@ -104,7 +104,7 @@ Still off: goal rates are the same in every league (Bundesliga 3.02, La Liga 2.6
 
 ## The shot-based model (2026-11-07)
 
-`engine/src/sim/shot_based.rs` plays the top five leagues (`TOP_FIVE_LEAGUES`, set by `Rules::for_league`); every other competition keeps the cheap model. Constants were tuned in the simtool (`cargo run -p simtool --release -- --seasons 40`, 20 seasons for FC 24), first against the event rates, then against the tables. Goals come out of the shots, so the table check is the same as for the cheap model.
+`engine/src/sim/shot_based.rs` plays every competition for now (`DEFAULT_MODEL` in `competition/mod.rs`, switched on for play-testing; it was the top five leagues only before). Set `DEFAULT_MODEL` to `Cheap` to speed up background leagues. Constants were tuned in the simtool (`cargo run -p simtool --release -- --seasons 40`, 20 seasons for FC 24), first against the event rates, then against the tables. Goals come out of the shots, so the table check is the same as for the cheap model.
 
 | Big five together | Goals | Home % | Draw % | Away % | 1st | 2nd | 4th | Last |
 |---|---|---|---|---|---|---|---|---|

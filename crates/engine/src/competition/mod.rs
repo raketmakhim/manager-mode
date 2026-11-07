@@ -66,7 +66,11 @@ pub struct Rules {
     pub model: MatchModel,
 }
 
-/// The five leagues played with the detailed match model, as (league name, country).
+/// The model every competition is played with. All use the shot-based model for now (events, scorers, play-testing);
+/// set this to `MatchModel::Cheap` to speed up background leagues, or give a competition its own model in `Rules`.
+pub const DEFAULT_MODEL: MatchModel = MatchModel::ShotBased;
+
+/// The five biggest leagues, as (league name, country): the ones the simtool checks against real tables.
 pub const TOP_FIVE_LEAGUES: [(&str, &str); 5] = [
     ("Premier League", "England"),
     ("Bundesliga", "Germany"),
@@ -78,13 +82,7 @@ pub const TOP_FIVE_LEAGUES: [(&str, &str); 5] = [
 impl Rules {
     /// Everyone plays everyone home and away. The default for any league we have not researched.
     pub fn double_round_robin() -> Rules {
-        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED, model: MatchModel::Cheap }
-    }
-
-    /// The rules of a league by its name and country: a double round robin, with the shot-based model for the top five.
-    pub fn for_league(name: &str, country: &str) -> Rules {
-        let model = if TOP_FIVE_LEAGUES.contains(&(name, country)) { MatchModel::ShotBased } else { MatchModel::Cheap };
-        Rules { model, ..Rules::double_round_robin() }
+        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED, model: DEFAULT_MODEL }
     }
 }
 
