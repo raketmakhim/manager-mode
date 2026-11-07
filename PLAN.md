@@ -20,7 +20,7 @@ A playable single-player manager mode: one full season loop (squad -> fixtures -
 | Calendar | Every fixture has a `competition` and a `week` (a 7-day block). A club plays at most 3 matches in any week (`MAX_MATCHES_PER_WEEK`). Leagues are scheduled up front, one round a week; cups will draw each round after the last is played and place it with `first_free_week`. `calendar_problems()` must always be empty |
 | Player growth | Follow real ratings from the dataset while history matches; once the world diverges, simulated growth nudged toward the real curve; fully simulated after the last data year |
 | Saves | JSON via `serde`, one file per save |
-| Randomness | Seeded `rand_chacha`; every sim takes an explicit RNG, no global state |
+| Randomness | Our own small seeded `Rng` (SplitMix64, `engine/src/rng.rs`), so a seed gives the same numbers on every machine and library version; every sim takes an explicit `&mut Rng`, no global state |
 
 ## Data model
 
@@ -53,7 +53,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 ### M3 - Season loop
 - Play next round, update table, fitness and form
 - Lineup and formation screen (GUI)
-- League table screen (GUI); the fixtures screen already exists (Season tab)
+- League table screen (GUI); fixtures screens exist (Career tab for your club, League browser for any league)
 - First game screen: a Career tab (new career, club fixtures with dates) is done. Competition stages: **steps 1-2 done** (types, `RoundRobin`, richer match `Outcome`, single-leg `Knockout` with a seeded draw and byes, a default cup per country, our own seeded `Rng`); next a shared standings function, then rules by season (see `research/engineering/competition-design.md`). League phase, split, groups and two-leg ties come later, each when a competition needs it
 - **Done when**: a full season can be played start to finish in the GUI
 
