@@ -12,6 +12,7 @@ A playable single-player manager mode: one full season loop (squad -> fixtures -
 | Front end | `egui` window (`crates/gui`) plus a `ratatui` terminal view (`crates/tui`); both sit on the UI-free `engine` crate. Bevy only if a 2D match view is ever added |
 | Match presentation | Simulation only: you never play a match. Text commentary + stats, no 2D pitch |
 | Data | Historical yearly datasets (one per FIFA edition) in a read-only SQLite file, `history.db`, built by `crates/import`; start a career in any covered year. Today: FIFA 15 to FC 24 (Kaggle); earlier editions need a scrape. `engine::load_edition` turns an edition into an in-memory `World`; it becomes a `DataSource` trait only if a second source appears. The data is not committed. |
+| Competitions | A competition is a list of **stages** (round-robin, knockout, league phase...), not a type per kind. Rules are data and depend on the season (formats change between 2014 and 2023). Pairing, calendar placement, standings and qualification stay separate and reusable. Design in `research/engineering/competition-design.md` |
 | Calendar | Every fixture has a `competition` and a `week` (a 7-day block). A club plays at most 3 matches in any week (`MAX_MATCHES_PER_WEEK`). Leagues are scheduled up front, one round a week; cups will draw each round after the last is played and place it with `first_free_week`. `calendar_problems()` must always be empty |
 | Player growth | Follow real ratings from the dataset while history matches; once the world diverges, simulated growth nudged toward the real curve; fully simulated after the last data year |
 | Saves | JSON via `serde`, one file per save |
@@ -49,6 +50,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - Play next round, update table, fitness and form
 - Lineup and formation screen (GUI)
 - League table screen (GUI); the fixtures screen already exists (Season tab)
+- Competition stages: `RoundRobin` (wrapping today's generator) and single-leg `Knockout` with a seeded draw, a shared standings function, then rules by season (see `research/engineering/competition-design.md`). League phase, split, groups and two-leg ties come later, each when a competition needs it
 - **Done when**: a full season can be played start to finish in the GUI
 
 ### M4 - Transfers and finance
