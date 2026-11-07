@@ -5,6 +5,7 @@
 //! Every season starts from the same edition and plays every league (no cups, no promotion) with the chosen match
 //! model, with a different seed. With the shot-based model it also counts the events (shots, cards, corners...).
 use engine::{load_edition, simulate, team_strength, ClubId, Competition, Connection, Event, MatchModel, Rng, World, TOP_FIVE_LEAGUES};
+use std::ops::Range;
 use std::time::Instant;
 
 struct Options {
@@ -169,6 +170,25 @@ impl Totals {
         self.top_three_won += (s.champion_strength_rank <= 3) as u32;
     }
 
+    /// Adds the seasons of another `Totals` (played by another thread).
+    fn merge(&mut self, o: &Totals) {
+        self.events.add(&o.events);
+        self.seasons += o.seasons;
+        self.club_count += o.club_count;
+        let (s, t) = (&mut self.season, &o.season);
+        s.matches += t.matches;
+        s.goals += t.goals;
+        s.home_wins += t.home_wins;
+        s.draws += t.draws;
+        s.away_wins += t.away_wins;
+        s.champion += t.champion;
+        s.runner_up += t.runner_up;
+        s.fourth += t.fourth;
+        s.last += t.last;
+        self.strongest_won += o.strongest_won;
+        self.top_three_won += o.top_three_won;
+    }
+
     fn line(&self, label: &str) -> String {
         let (s, n) = (&self.season, self.seasons as f64);
         let matches = s.matches.max(1) as f64;
@@ -217,12 +237,14 @@ fn measure(world: &World, league: &Competition) -> LeagueSeason {
     season
 }
 
-/// Plays `seasons` seasons of every league and returns the totals: all leagues together, the big five together,
-/// then each of the big five.
-fn run(world: &mut World, options: &Options) -> Vec<(String, Totals)> {
+/// The totals of a run, by label: all leagues together, the big five together, then each of the big five.
+type Report = Vec<(String, Totals)>;
+
+/// Plays the seasons in `seasons` (each with its own seed) of every league on `world`.
+fn run(world: &mut World, options: &Options, seasons: Range<u64>) -> Report {
     let (mut all, mut big_five) = (Totals::default(), Totals::default());
-    let mut big: Vec<(String, Totals)> = TOP_FIVE_LEAGUES.iter().map(|(name, country)| (format!("{name} ({country})"), Totals::default())).collect();
-    for season in 0..options.seasons {
+    let mut big: Report = TOP_FIVE_LEAGUES.iter().map(|(name, country)| (format!("{name} ({country})"), Totals::default())).collect();
+    for season in seasons {
         let mut rng = Rng::new(options.seed + season);
         world.generate_fixtures(); // starts every league again, results cleared
         for league in world.competitions.values_mut() {
@@ -240,9 +262,49 @@ fn run(world: &mut World, options: &Options) -> Vec<(String, Totals)> {
             }
         }
     }
-    let mut totals = vec![("All leagues of 8+ clubs".to_string(), all), ("The big five together".to_string(), big_five)];
-    totals.extend(big.into_iter().filter(|(_, t)| t.seasons > 0));
-    totals
+    let mut report = vec![("All leagues of 8+ clubs".to_string(), all), ("The big five together".to_string(), big_five)];
+    report.extend(big);
+    report
+}
+
+/// Seasons are independent (each has its own seed), so they are shared out over threads, each with its own world.
+/// Below this many seasons the cost of loading a world per thread outweighs the gain.
+const SEASONS_WORTH_THREADING: u64 = 3;
+
+/// Plays all the seasons, on as many threads as there are cores (one thread for a short run), and adds them up.
+fn play(options: &Options) -> Report {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
+    let threads = if options.seasons < SEASONS_WORTH_THREADING { 1 } else { cores.min(options.seasons) };
+    let share = options.seasons.div_ceil(threads);
+    let reports: Vec<Report> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                let range = (t * share)..((t + 1) * share).min(options.seasons);
+                scope.spawn(move || run(&mut load_world(options), options, range))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("a simulation thread panicked")).collect()
+    });
+    let mut reports = reports.into_iter();
+    let mut total = reports.next().expect("at least one thread");
+    for report in reports {
+        for ((_, t), (_, o)) in total.iter_mut().zip(&report) {
+            t.merge(o);
+        }
+    }
+    total
+}
+
+/// The chosen edition from the database, or an error message and exit.
+fn load_world(options: &Options) -> World {
+    let conn = Connection::open(&options.db).unwrap_or_else(|e| {
+        eprintln!("cannot open {}: {e}. Build it first: cargo run -p import --release", options.db);
+        std::process::exit(1);
+    });
+    load_edition(&conn, options.edition).unwrap_or_else(|e| {
+        eprintln!("cannot load edition {}: {e}", options.edition);
+        std::process::exit(1);
+    })
 }
 
 fn main() {
@@ -251,20 +313,11 @@ fn main() {
         eprintln!("{message}\nUsage: simtool [--edition 15] [--seasons 20] [--seed 1] [--model cheap|shot-based] [--db history.db]");
         std::process::exit(2);
     });
-    let conn = Connection::open(&options.db).unwrap_or_else(|e| {
-        eprintln!("cannot open {}: {e}. Build it first: cargo run -p import --release", options.db);
-        std::process::exit(1);
-    });
-    let mut world = load_edition(&conn, options.edition).unwrap_or_else(|e| {
-        eprintln!("cannot load edition {}: {e}", options.edition);
-        std::process::exit(1);
-    });
-
     let start = Instant::now();
-    let totals = run(&mut world, &options);
+    let totals = play(&options);
     let elapsed = start.elapsed();
     println!("Edition {}, {} seasons from seed {}, {} model.\n", options.edition, options.seasons, options.seed, options.model.map_or("each league's own".to_string(), |m| format!("{m:?}")));
-    for (label, t) in &totals {
+    for (label, t) in totals.iter().filter(|(_, t)| t.seasons > 0) {
         println!("{}", t.line(label));
         if let Some(events) = t.events.line() {
             println!("{events}");
@@ -303,8 +356,8 @@ mod tests {
         if !std::path::Path::new(path).exists() { return; } // needs `cargo run -p import` first
         let mut world = load_edition(&Connection::open(path).unwrap(), 15).unwrap();
         let options = Options { db: path.into(), edition: 15, seasons: 1, seed: 3, model: None };
-        let first = run(&mut world, &options);
-        let second = run(&mut world, &options);
+        let first = run(&mut world, &options, 0..1);
+        let second = run(&mut world, &options, 0..1);
         let (all, again) = (&first[0].1, &second[0].1);
         let s = &all.season;
         assert!(s.matches > 5000);
@@ -312,5 +365,16 @@ mod tests {
         let goals_per_match = s.goals as f64 / s.matches as f64;
         assert!((1.5..4.5).contains(&goals_per_match), "{goals_per_match} goals a match");
         assert_eq!((s.goals, s.home_wins), (again.season.goals, again.season.home_wins), "the same seed gives the same run");
+    }
+
+    #[test]
+    fn sharing_seasons_over_threads_gives_the_same_totals_as_playing_them_in_a_row() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../history.db");
+        if !std::path::Path::new(path).exists() { return; } // needs `cargo run -p import` first
+        let options = Options { db: path.into(), edition: 15, seasons: 4, seed: 3, model: None };
+        let in_a_row = run(&mut load_world(&options), &options, 0..4);
+        let threaded = play(&options);
+        let (a, b) = (&in_a_row[0].1.season, &threaded[0].1.season);
+        assert_eq!((a.matches, a.goals, a.home_wins, a.draws), (b.matches, b.goals, b.home_wins, b.draws));
     }
 }
