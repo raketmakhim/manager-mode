@@ -1,5 +1,5 @@
 //! Who plays whom. Pure functions: clubs in, fixtures out, no `World`.
-use crate::model::{ClubId, CompetitionId, Fixture};
+use crate::model::{ClubId, CompetitionId, Day, Fixture};
 
 /// Builds a league's double round-robin with the "circle method": one club stays put, the others rotate round it.
 /// - First half: N-1 rounds (N even), every pair meets once. Second half: the same rounds with home and away swapped.
@@ -39,6 +39,7 @@ pub fn round_robin(competition: CompetitionId, clubs: &[ClubId]) -> Vec<Fixture>
         competition,
         round: (r + 1) as u8,
         week: (r + 1) as u8,
+        day: Day::Saturday,
         home: clubs[home],
         away: clubs[away],
         result: None,

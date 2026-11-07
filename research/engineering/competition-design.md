@@ -135,9 +135,9 @@ The league has up to about 56 leagues per edition, around 10,000 to 11,000 leagu
 ## Order of work
 
 1. **Done (2026-11-07):** `crates/engine/src/competition/` with `Competition`, `Rules`, `Stage`, `Format::RoundRobin` and `Entry::AllClubs`; `round_robin` and the calendar functions moved in unchanged; a richer match `Outcome` (full time, extra time, shootout) in `outcome.rs`. Built simpler than the sketch above: a `Competition` holds the `Rules` already resolved for its season (the year lookup comes in step 4), and `RoundRobin` has no `legs` parameter until a competition needs a single round-robin.
-2. **Done (2026-11-07):** `Format::Knockout` in `competition/knockout.rs`: `draw_round` (a preliminary round for the extra clubs, byes for the rest), `World::advance_cups` (draws the next round once the last is played; survivors are worked out from results), a default cup per country. Also `World::start_season` as the one game-setup call (`load_edition` stays real data only), our own seeded `Rng`, and `week_date`. Not done: seeding, lower-division hosts, two legs, real cup dates (cup rounds take the first week with room, marked `shortcut:` in the code).
-3. Make league fixtures come out of a stage state machine, plus the shared standings function.
-4. Rules-by-year lookup, with the top few countries written by hand.
+2. **Done (2026-11-07):** `Format::Knockout` in `competition/knockout.rs`: `draw_round` (a preliminary round for the extra clubs, byes for the rest), `World::advance_cups` (draws the next round once the last is played; survivors are worked out from results), a default cup per country. Also `World::start_season` as the one game-setup call (`load_edition` stays real data only), our own seeded `Rng`, and `week_date`. Not done: seeding, lower-division hosts, two legs, real cup dates (cup rounds are in week 3 and then every 4 weeks, on Wednesdays, marked `shortcut:` in the code).
+3. **Standings done (2026-11-07):** `standings` and `World::table` (3-1-0 points; one tie-break order, a `shortcut:`). Still open: make league fixtures come out of a stage state machine.
+4. (Season change is in, with a default of 3 relegation places; the real numbers per country and year, and play-offs, belong here.) Rules-by-year lookup, with the top few countries written by hand.
 5. League phase, split, groups and two-leg ties, each when a competition needs it.
 
 ## Open questions

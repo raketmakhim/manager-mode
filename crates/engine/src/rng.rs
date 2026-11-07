@@ -18,6 +18,11 @@ impl Rng {
         z ^ (z >> 31)
     }
 
+    /// A number from 0 up to but not including 1.
+    pub fn unit(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
     /// A number from 0 to `n` - 1. The modulo bias is about n / 2^64, far too small to matter here.
     pub fn below(&mut self, n: usize) -> usize {
         (self.next_u64() % n as u64) as usize

@@ -1,8 +1,8 @@
 //! Career tab: start a new career (pick a year, a league and a club), then see that club's fixtures and dates.
 use crate::season::{league_label, sorted_leagues};
-use crate::RED;
-use eframe::egui::{self, RichText};
-use engine::{edition_label, editions, load_edition, season_label, week_date, ClubId, CompetitionId, Connection, Rng, World};
+use crate::{competitions, fixtures, RED};
+use eframe::egui;
+use engine::{edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, World};
 
 pub struct Career {
     /// Editions in the database, oldest first.
@@ -15,13 +15,20 @@ pub struct Career {
     club: Option<ClubId>,
     /// False: the new-career form. True: the club's season.
     started: bool,
+    view: View,
+    /// The competition shown in the Competitions view; `None` means your own league.
+    competition: Option<CompetitionId>,
+    /// Seeded when the career starts; every simulated match draws from it.
+    rng: Rng,
+    /// The result of the last match you played, for the line next to the button.
+    last_played: Option<String>,
     error: Option<String>,
 }
 
 impl Career {
     pub fn new(conn: &Connection) -> Self {
         let editions = editions(conn).unwrap_or_default();
-        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, error: None }
+        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, rng: Rng::new(0), last_played: None, error: None }
     }
 
     /// Loads the picked edition and selects the first league and club.
@@ -47,10 +54,51 @@ impl Career {
     /// Draws the season's fixtures; the seed makes the cup draw the same for the same edition.
     fn start(&mut self) {
         if let Some(world) = &mut self.world {
-            world.start_season(&mut Rng::new(self.edition as u64));
+            self.rng = Rng::new(self.edition as u64);
+            self.last_played = None;
+            self.competition = None;
+            self.view = View::Fixtures;
+            world.start_season(&mut self.rng);
             self.started = true;
         }
     }
+
+    /// Plays the club's next match (and everything before it in the league and cups) and remembers its result.
+    fn play_next_match(&mut self, club: ClubId) {
+        let Some(world) = &mut self.world else { return };
+        self.last_played = Some(match world.play_next_match(club, &mut self.rng) {
+            None => "Nothing left to play.".to_string(),
+            Some(index) => {
+                let f = &world.fixtures[index];
+                let result = f.result.map_or(String::new(), |o| o.to_string());
+                format!("{} {} {}", world.clubs[&f.home].name, result, world.clubs[&f.away].name)
+            }
+        });
+    }
+
+    /// Simulates every match that is left in the season, for all clubs.
+    fn finish_season(&mut self) {
+        let Some(world) = &mut self.world else { return };
+        world.play_season_to_end(&mut self.rng);
+        self.last_played = Some("Season finished.".to_string());
+    }
+
+    /// Promotion and relegation, then the next season's fixtures. Says what happened to your club.
+    fn start_next_season(&mut self, club: ClubId) {
+        let Some(world) = &mut self.world else { return };
+        let Some(moves) = world.start_next_season(&mut self.rng) else { return };
+        let mine = moves.iter().find(|m| m.club == club);
+        let text = match mine {
+            Some(m) => {
+                let verb = if world.competitions[&m.to].level < world.competitions[&m.from].level { "promoted to" } else { "relegated to" };
+                format!("Your club was {verb} the {}.", world.competitions[&m.to].name)
+            }
+            _ => "Your club stays in its division.".to_string(),
+        };
+        self.last_played = Some(format!("{} clubs changed division. {text}", moves.len()));
+        self.competition = None;
+    }
+
 
     pub fn ui(&mut self, ui: &mut egui::Ui, conn: &Connection) {
         if self.world.is_none() {
@@ -120,77 +168,52 @@ impl Career {
     }
 
     fn season_ui(&mut self, ui: &mut egui::Ui, conn: &Connection) {
-        let (Some(world), Some(club_id)) = (&self.world, self.club) else { return };
-        let club = &world.clubs[&club_id];
-        let league = &world.competitions[&club.league];
+        let (Some(club_id), Some(world)) = (self.club, &self.world) else { return };
+        let (club, league) = (&world.clubs[&club_id], &world.competitions[&world.clubs[&club_id].league]);
+        let title = format!("{} · season {}", league_label(league), season_name(world.year));
         ui.horizontal(|ui| {
             ui.heading(&club.name);
-            ui.label(format!("{} · season {}", league_label(league), season_label(world.edition)));
+            ui.label(title);
         });
-        if ui.button("New career").clicked() {
-            self.started = false;
-            self.load(conn); // start_season changed the world, so load a clean one
-            return;
-        }
+        ui.horizontal(|ui| {
+            let finished = self.world.as_ref().is_some_and(|w| w.season_finished());
+            if ui.add_enabled(!finished, egui::Button::new("Play next match")).clicked() {
+                self.play_next_match(club_id);
+            }
+            if ui.add_enabled(!finished, egui::Button::new("Finish season")).clicked() {
+                self.finish_season();
+            }
+            if ui.add_enabled(finished, egui::Button::new("Start next season")).clicked() {
+                self.start_next_season(club_id);
+            }
+            if ui.button("New career").clicked() {
+                self.started = false;
+                self.load(conn); // the season changed the world, so load a clean one
+            }
+            if let Some(text) = &self.last_played {
+                ui.label(text);
+            }
+        });
+        let Some(world) = &self.world else { return };
         ui.separator();
 
-        // One row per match, plus a row for each cup the club is in but does not play in the first round (a bye).
-        let mut rows: Vec<Row> = world
-            .fixtures
-            .iter()
-            .filter(|f| f.home == club_id || f.away == club_id)
-            .map(|f| {
-                let home = f.home == club_id;
-                Row {
-                    week: f.week,
-                    competition: world.competitions[&f.competition].name.clone(),
-                    round: f.round.to_string(),
-                    venue: if home { "H" } else { "A" },
-                    opponent: world.clubs[if home { &f.away } else { &f.home }].name.clone(),
-                    result: f.result.map_or("-".to_string(), |o| o.to_string()),
-                }
-            })
-            .collect();
-        for cup in world.competitions.values().filter(|c| c.is_cup() && c.clubs.contains(&club_id)) {
-            let drawn = || world.fixtures.iter().filter(|f| f.competition == cup.id);
-            if !drawn().any(|f| f.home == club_id || f.away == club_id) {
-                let week = drawn().map(|f| f.week).min().unwrap_or(1);
-                rows.push(Row { week, competition: cup.name.clone(), round: "1".into(), venue: "", opponent: "bye: into round 2".into(), result: "-".into() });
-            }
-        }
-        rows.sort_by(|a, b| (a.week, &a.competition).cmp(&(b.week, &b.competition)));
-        ui.label(format!("{} fixtures. Cup rounds after the first are drawn as results come in.", rows.len()));
-        ui.add_space(6.0);
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("career_fixtures").striped(true).min_col_width(100.0).show(ui, |ui| {
-                for h in ["Date", "Competition", "Round", "", "Opponent", "Result"] {
-                    ui.label(RichText::new(h).strong());
-                }
-                ui.end_row();
-                for r in rows {
-                    ui.label(week_date(world.year, r.week));
-                    ui.label(r.competition);
-                    ui.label(r.round);
-                    ui.label(r.venue);
-                    ui.label(r.opponent);
-                    ui.label(r.result);
-                    ui.end_row();
-                }
-            });
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.view, View::Fixtures, "My fixtures");
+            ui.selectable_value(&mut self.view, View::Competitions, "Competitions");
         });
+        ui.add_space(6.0);
+        match self.view {
+            View::Fixtures => fixtures::ui(ui, world, club_id),
+            View::Competitions => competitions::ui(ui, world, club_id, &mut self.competition),
+        }
     }
 }
 
-/// One line of the fixture table.
-struct Row {
-    /// Season week, 1 = first.
-    week: u8,
-    competition: String,
-    round: String,
-    /// "H", "A", or empty for a bye.
-    venue: &'static str,
-    opponent: String,
-    result: String,
+/// What the season screen shows.
+#[derive(PartialEq)]
+enum View {
+    Fixtures,
+    Competitions,
 }
 
 #[cfg(test)]
@@ -213,5 +236,8 @@ mod tests {
         let n = world.competitions[&league].clubs.len();
         assert_eq!(mine(league), 2 * (n - 1));
         assert!(world.calendar_problems().is_empty());
+        let name = world.clubs[&club].name.clone();
+        c.play_next_match(club);
+        assert!(c.last_played.as_deref().is_some_and(|t| t.contains(&name)));
     }
 }

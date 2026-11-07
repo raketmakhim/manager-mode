@@ -1,17 +1,18 @@
 //! When matches are played, and the limit on how many a club may play in one week.
-use crate::model::{ClubId, World, MAX_MATCHES_PER_WEEK};
+use crate::model::{ClubId, Day, World, MAX_MATCHES_PER_WEEK};
 use std::collections::BTreeMap;
 
-/// The Saturday a season's matches are played in `week` (1 = first week), like "Sat 9 Aug 2014".
+/// The date a match is played, like "Wed 13 Aug 2014": the week's Saturday plus the day's offset.
 /// Week 1 is the first Saturday on or after 9 August of `season_start_year`.
 // shortcut: every match is on a Saturday and the season never pauses (no winter break, no international breaks);
 // upgrade when fixtures carry real dates.
-pub fn week_date(season_start_year: u16, week: u8) -> String {
+pub fn match_date(season_start_year: u16, week: u8, day: Day) -> String {
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let first_day = days_from_civil(season_start_year as i64, 8, 9);
     let to_saturday = (5 - weekday(first_day)).rem_euclid(7); // Monday = 0
-    let (year, month, day) = civil_from_days(first_day + to_saturday + 7 * (week as i64 - 1));
-    format!("Sat {day} {} {year}", MONTHS[month as usize - 1])
+    let saturday = first_day + to_saturday + 7 * (week as i64 - 1);
+    let (year, month, day_of_month) = civil_from_days(saturday + day.days_after_saturday());
+    format!("{} {day_of_month} {} {year}", day.short_name(), MONTHS[month as usize - 1])
 }
 
 /// Day number counted from 1970-01-01 (Howard Hinnant's civil-date algorithm).
@@ -78,20 +79,21 @@ impl World {
 mod tests {
     use super::*;
     use crate::competition::round_robin;
-    use crate::model::Fixture;
+    use crate::model::{Day, Fixture};
 
     /// A fixture for club 1 at home in `week`, of some made-up cup.
     fn cup_match(week: u8) -> Fixture {
-        Fixture { competition: 900, round: 1, week, home: 1, away: 2, result: None }
+        Fixture { competition: 900, round: 1, week, day: Day::Wednesday, home: 1, away: 2, result: None }
     }
 
     #[test]
     fn weeks_are_saturdays_a_week_apart_across_the_new_year() {
-        assert_eq!(week_date(2014, 1), "Sat 9 Aug 2014"); // 9 August 2014 was a Saturday
-        assert_eq!(week_date(2014, 2), "Sat 16 Aug 2014");
-        assert_eq!(week_date(2014, 25), "Sat 24 Jan 2015");
-        assert_eq!(week_date(2023, 1), "Sat 12 Aug 2023"); // 9 August 2023 was a Wednesday
-        assert_eq!(week_date(2015, 30), "Sat 5 Mar 2016"); // 2016 is a leap year: Feb has 29 days
+        assert_eq!(match_date(2014, 1, Day::Saturday), "Sat 9 Aug 2014"); // 9 August 2014 was a Saturday
+        assert_eq!(match_date(2014, 1, Day::Wednesday), "Wed 13 Aug 2014");
+        assert_eq!(match_date(2014, 2, Day::Saturday), "Sat 16 Aug 2014");
+        assert_eq!(match_date(2014, 25, Day::Saturday), "Sat 24 Jan 2015");
+        assert_eq!(match_date(2023, 1, Day::Saturday), "Sat 12 Aug 2023"); // 9 August 2023 was a Wednesday
+        assert_eq!(match_date(2015, 30, Day::Saturday), "Sat 5 Mar 2016"); // 2016 is a leap year: Feb has 29 days
     }
 
     #[test]

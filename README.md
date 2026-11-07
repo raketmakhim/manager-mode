@@ -9,7 +9,7 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 - Imports real FIFA player data (FIFA 15 to FC 24, 2014/15 to 2023/24) into one SQLite file
 - Loads any of those editions into the game: every league, club and squad, with the real attributes
 - Generates each league's season fixtures (everyone plays everyone home and away, at most 3 matches per club per week)
-- A window with a **Career** tab (new career: pick a year, a league and a club, then see that club's fixtures with dates, cup draw included), a **League browser** tab (any league's fixtures by round or club) and a **Player scout** tab (search any player and see how their stats really changed in later editions)
+- A window with a **Career** tab (new career: pick a year, a league and a club, see that club's fixtures with dates, and press **Play next match** to simulate it, switch to **Competitions** for any league table or cup rounds, **Finish season** to sim the rest, then **Start next season** for promotion, relegation and new fixtures), a **League browser** tab (any league's fixtures by round or club) and a **Player scout** tab (search any player and see how their stats really changed in later editions)
 
 ## Planned features (v1)
 

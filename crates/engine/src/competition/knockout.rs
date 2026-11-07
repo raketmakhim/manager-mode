@@ -1,14 +1,21 @@
 //! Single-leg knockout cups: draw a round, play it, draw the next from the winners.
 use super::{Competition, Entry, Format, Rules, Stage};
-use crate::model::{ClubId, CompetitionId, Fixture, World};
+use crate::model::{ClubId, CompetitionId, Day, Fixture, World};
 use crate::outcome::Side;
 use crate::rng::Rng;
 use std::collections::{BTreeMap, HashSet};
 
+/// The season week of a cup's first round: after the league has started, before the first cup clash with it.
+const CUP_FIRST_WEEK: u8 = 3;
+/// Weeks between one cup round and the next, so the rounds are spread through the season.
+const CUP_WEEKS_BETWEEN_ROUNDS: u8 = 4;
+/// Domestic cups are played midweek.
+const CUP_DAY: Day = Day::Wednesday;
+
 impl Rules {
     /// One single-leg knockout of every club. The default for any cup we have not researched.
     pub fn default_cup() -> Rules {
-        Rules { stages: vec![Stage { format: Format::Knockout, entry: Entry::AllClubs }] }
+        Rules { stages: vec![Stage { format: Format::Knockout, entry: Entry::AllClubs }], relegated: 0 }
     }
 }
 
@@ -50,31 +57,33 @@ impl World {
         let countries: Vec<_> = by_country.into_iter().filter(|(country, clubs)| clubs.len() >= 2 && !has_cup(country)).collect();
         for (id, (country, clubs)) in (first_id..).zip(countries) {
             let name = format!("{country} Cup");
-            self.competitions.insert(id, Competition { id, name, country, rules: Rules::default_cup(), clubs });
+            self.competitions.insert(id, Competition { id, name, country, rules: Rules::default_cup(), level: None, clubs });
         }
     }
 
     /// Draws the next round of every cup whose current round is fully played (the first round if none is drawn yet).
     /// Call it again after each batch of results. Every played cup match must have a winner.
-    // shortcut: a round goes in the first week where all its clubs have room after the previous round; real cups
-    // have fixed dates. Upgrade when cup dates become data in `Rules`.
+    // shortcut: every cup plays round 1 in week 3 and then one round every 4 weeks, on a Wednesday, whatever the
+    // country; real cups have fixed dates. Upgrade when cup dates become data in `Rules`.
     pub fn advance_cups(&mut self, rng: &mut Rng) {
         let cups: Vec<(CompetitionId, Vec<ClubId>)> =
             self.competitions.values().filter(|c| c.is_cup()).map(|c| (c.id, c.clubs.clone())).collect();
         for (id, clubs) in cups {
             let own: Vec<&Fixture> = self.fixtures.iter().filter(|f| f.competition == id).collect();
             let last_round = own.iter().map(|f| f.round).max().unwrap_or(0);
-            let last_week = own.iter().map(|f| f.week).max().unwrap_or(0);
             if own.iter().any(|f| f.result.is_none()) {
                 continue; // the round is still being played
             }
             let matches = draw_round(&clubs_left(&clubs, &own), rng);
             let playing: Vec<ClubId> = matches.iter().flat_map(|&(home, away)| [home, away]).collect();
-            let Some(week) = self.first_free_week(&playing, last_week + 1) else { continue };
+            let round = last_round + 1;
+            let first_choice = CUP_FIRST_WEEK.saturating_add((round - 1).saturating_mul(CUP_WEEKS_BETWEEN_ROUNDS));
+            let Some(week) = self.first_free_week(&playing, first_choice) else { continue };
             self.fixtures.extend(matches.into_iter().map(|(home, away)| Fixture {
                 competition: id,
-                round: last_round + 1,
+                round,
                 week,
+                day: CUP_DAY,
                 home,
                 away,
                 result: None,
@@ -91,7 +100,7 @@ mod tests {
     fn world_with_cup(n: u32) -> World {
         let mut w = World::new(0, 0);
         let clubs = (1..=n).collect();
-        w.competitions.insert(1, Competition { id: 1, name: "Cup".into(), country: "X".into(), rules: Rules::default_cup(), clubs });
+        w.competitions.insert(1, Competition { id: 1, name: "Cup".into(), country: "X".into(), rules: Rules::default_cup(), level: None, clubs });
         w
     }
 
@@ -134,6 +143,16 @@ mod tests {
     }
 
     #[test]
+    fn cup_rounds_are_spread_through_the_season_on_midweek_days() {
+        let mut w = world_with_cup(32);
+        play_out(&mut w, &mut Rng::new(3));
+        let mut weeks: Vec<(u8, u8)> = w.fixtures.iter().map(|f| (f.round, f.week)).collect();
+        weeks.dedup();
+        assert_eq!(weeks, vec![(1, 3), (2, 7), (3, 11), (4, 15), (5, 19)]);
+        assert!(w.fixtures.iter().all(|f| f.day == Day::Wednesday));
+    }
+
+    #[test]
     fn the_next_round_waits_until_the_current_one_is_played() {
         let mut w = world_with_cup(8);
         let mut rng = Rng::new(1);
@@ -161,6 +180,7 @@ mod tests {
             name: "L".into(),
             country: country.into(),
             rules: Rules::double_round_robin(),
+            level: None,
             clubs,
         };
         w.competitions.insert(4, league(4, "England", vec![1, 2]));

@@ -39,10 +39,14 @@ pub fn edition_label(version: i64) -> String {
     if version >= 24 { format!("FC {version}") } else { format!("FIFA {version}") }
 }
 
+/// "2014/15" for a season starting in 2014.
+pub fn season_name(start_year: u16) -> String {
+    format!("{start_year}/{:02}", (start_year + 1) % 100)
+}
+
 /// "2014/15" for version 15 (FIFA 15 shipped in autumn 2014).
 pub fn season_label(version: i64) -> String {
-    let start = 1999 + version;
-    format!("{start}/{:02}", (start + 1) % 100)
+    season_name((1999 + version) as u16)
 }
 
 /// Live name search, best players first. shortcut: LIKE is accent-sensitive ("Mbappe" will not find "Mbappé"), fix with an unaccented name column if it annoys.

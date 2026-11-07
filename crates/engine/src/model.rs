@@ -110,6 +110,38 @@ pub struct Club {
     pub lineup: Vec<PlayerId>,
 }
 
+/// The day of the week a match is played. A season week starts on the Saturday, so the order here is the order
+/// within a week: league matches on Saturday, then the midweek cup and European nights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Day {
+    Saturday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+}
+
+impl Day {
+    /// Days after that week's Saturday.
+    pub fn days_after_saturday(self) -> i64 {
+        match self {
+            Day::Saturday => 0,
+            Day::Tuesday => 3,
+            Day::Wednesday => 4,
+            Day::Thursday => 5,
+        }
+    }
+
+    /// "Sat", "Tue", "Wed" or "Thu".
+    pub fn short_name(self) -> &'static str {
+        match self {
+            Day::Saturday => "Sat",
+            Day::Tuesday => "Tue",
+            Day::Wednesday => "Wed",
+            Day::Thursday => "Thu",
+        }
+    }
+}
+
 pub struct Fixture {
     pub competition: CompetitionId,
     /// Matchday within its competition: 1 = the first round of that league or cup.
@@ -117,6 +149,8 @@ pub struct Fixture {
     /// When it is played: 1 = the first week of the season. Rounds of different competitions can share a week,
     /// but no club may play more than `MAX_MATCHES_PER_WEEK` in one.
     pub week: u8,
+    /// Which day of that week. League matches are on Saturdays.
+    pub day: Day,
     pub home: ClubId,
     pub away: ClubId,
     /// `None` until played.

@@ -22,7 +22,7 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
 
     let mut st = conn.prepare(
         "SELECT t.team_id AS id, t.team_name AS name, te.league_id AS league_id, l.league_name AS league_name,
-                l.nationality_name AS country, te.transfer_budget_eur AS budget
+                l.nationality_name AS country, te.league_level AS level, te.transfer_budget_eur AS budget
          FROM team_editions te
          JOIN teams t USING (team_id)
          JOIN leagues l USING (league_id)
@@ -42,14 +42,16 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
             },
             r.get::<_, String>("league_name")?,
             r.get::<_, String>("country")?,
+            r.get::<_, Option<u8>>("level")?,
         ))
     })?;
     for club in clubs {
-        let (club, league_name, country) = club?;
+        let (club, league_name, country, level) = club?;
         let league = world.competitions.entry(club.league).or_insert_with(|| Competition {
             id: club.league,
             name: league_name,
             country,
+            level,
             rules: Rules::double_round_robin(),
             clubs: vec![],
         });

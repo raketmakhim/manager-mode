@@ -2,16 +2,24 @@
 //!
 //! - `pairing`: who plays whom in a league, as a pure function (`round_robin`).
 //! - `knockout`: cups, drawn round by round (`draw_round`, `World::advance_cups`).
+//! - `play`: playing fixtures one match, one week or up to a club's next match.
+//! - `standings`: league tables from results (`standings`, `World::table`).
+//! - `season`: the end of a season (promotion and relegation) and the start of the next.
 //! - `calendar`: when matches are played, and the limit on matches per week.
 //!
 //! Design and reasons: `research/engineering/competition-design.md`.
 mod calendar;
 mod knockout;
 mod pairing;
+mod play;
+mod season;
+mod standings;
 
-pub use calendar::week_date;
+pub use calendar::match_date;
 pub use knockout::draw_round;
 pub use pairing::round_robin;
+pub use season::ClubMove;
+pub use standings::{standings, TableRow};
 
 use crate::model::{ClubId, CompetitionId, World};
 use crate::rng::Rng;
@@ -25,6 +33,8 @@ pub struct Competition {
     pub country: String,
     /// The rules for the season this competition is played in.
     pub rules: Rules,
+    /// Division within its country, 1 = top flight. `None` for cups, and for leagues the data gives no level.
+    pub level: Option<u8>,
     pub clubs: Vec<ClubId>,
 }
 
@@ -40,17 +50,23 @@ impl Competition {
     }
 }
 
+/// Relegation places when a league is not researched. Real leagues vary (2 to 4, plus play-offs).
+const DEFAULT_RELEGATED: u8 = 3;
+
 /// How a competition is played, as a list of stages that run one after another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rules {
     /// Played in order: a later stage takes its clubs from earlier ones through its `Entry`.
     pub stages: Vec<Stage>,
+    /// How many of the bottom clubs drop to the division below at the end of the season. The same number come up
+    /// from that division. 0 for a cup.
+    pub relegated: u8,
 }
 
 impl Rules {
     /// Everyone plays everyone home and away. The default for any league we have not researched.
     pub fn double_round_robin() -> Rules {
-        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }] }
+        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED }
     }
 }
 
@@ -109,17 +125,17 @@ mod tests {
 
     #[test]
     fn the_default_rules_make_a_league() {
-        let c = Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), clubs: vec![] };
+        let c = Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), level: None, clubs: vec![] };
         assert!(c.is_league());
-        let cup_like = Rules { stages: vec![] };
+        let cup_like = Rules { stages: vec![], relegated: 0 };
         assert!(!Competition { rules: cup_like, ..c }.is_league());
     }
 
     #[test]
     fn a_competition_that_is_not_a_league_gets_no_fixtures_up_front() {
         let mut w = World::new(0, 0);
-        let rules = Rules { stages: vec![] };
-        w.competitions.insert(1, Competition { id: 1, name: "C".into(), country: "X".into(), rules, clubs: vec![1, 2, 3, 4] });
+        let rules = Rules { stages: vec![], relegated: 0 };
+        w.competitions.insert(1, Competition { id: 1, name: "C".into(), country: "X".into(), rules, level: None, clubs: vec![1, 2, 3, 4] });
         w.generate_fixtures();
         assert!(w.fixtures.is_empty());
     }
@@ -128,7 +144,7 @@ mod tests {
     fn starting_a_season_schedules_leagues_and_the_first_cup_round_within_the_weekly_limit() {
         let mut w = World::new(0, 0);
         let clubs: Vec<ClubId> = (1..=20).collect();
-        w.competitions.insert(1, Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), clubs });
+        w.competitions.insert(1, Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), level: None, clubs });
         w.start_season(&mut Rng::new(1));
         let cup = w.competitions.values().find(|c| c.is_cup()).expect("a default cup");
         assert_eq!(w.fixtures.iter().filter(|f| f.competition == 1).count(), 20 * 19);
