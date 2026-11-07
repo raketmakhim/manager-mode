@@ -142,14 +142,14 @@ impl Season {
 }
 
 /// Leagues that have fixtures (two or more clubs), A to Z by name then country.
-fn sorted_leagues(world: &World) -> Vec<&Competition> {
+pub(crate) fn sorted_leagues(world: &World) -> Vec<&Competition> {
     let mut v: Vec<&Competition> =
         world.competitions.values().filter(|c| c.is_league() && c.clubs.len() >= 2).collect();
     v.sort_by(|a, b| (&a.name, &a.country).cmp(&(&b.name, &b.country)));
     v
 }
 
-fn league_label(l: &Competition) -> String {
+pub(crate) fn league_label(l: &Competition) -> String {
     format!("{} ({})", l.name, l.country)
 }
 

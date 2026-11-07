@@ -2,6 +2,46 @@
 use crate::model::{ClubId, World, MAX_MATCHES_PER_WEEK};
 use std::collections::BTreeMap;
 
+/// The Saturday a season's matches are played in `week` (1 = first week), like "Sat 9 Aug 2014".
+/// Week 1 is the first Saturday on or after 9 August of `season_start_year`.
+// shortcut: every match is on a Saturday and the season never pauses (no winter break, no international breaks);
+// upgrade when fixtures carry real dates.
+pub fn week_date(season_start_year: u16, week: u8) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let first_day = days_from_civil(season_start_year as i64, 8, 9);
+    let to_saturday = (5 - weekday(first_day)).rem_euclid(7); // Monday = 0
+    let (year, month, day) = civil_from_days(first_day + to_saturday + 7 * (week as i64 - 1));
+    format!("Sat {day} {} {year}", MONTHS[month as usize - 1])
+}
+
+/// Day number counted from 1970-01-01 (Howard Hinnant's civil-date algorithm).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// The inverse of `days_from_civil`: (year, month 1-12, day 1-31).
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let m = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * m + 2) / 5 + 1;
+    let month = if m < 10 { m + 3 } else { m - 9 };
+    (year_of_era + era * 400 + (month <= 2) as i64, month, day)
+}
+
+/// 0 = Monday ... 6 = Sunday. 1970-01-01 was a Thursday.
+fn weekday(days: i64) -> i64 {
+    (days + 3).rem_euclid(7)
+}
+
 impl World {
     /// How many matches the club plays in that week (1 = first week of the season).
     // shortcut: scans every fixture on each call; index by (club, week) if scheduling gets slow
@@ -43,6 +83,15 @@ mod tests {
     /// A fixture for club 1 at home in `week`, of some made-up cup.
     fn cup_match(week: u8) -> Fixture {
         Fixture { competition: 900, round: 1, week, home: 1, away: 2, result: None }
+    }
+
+    #[test]
+    fn weeks_are_saturdays_a_week_apart_across_the_new_year() {
+        assert_eq!(week_date(2014, 1), "Sat 9 Aug 2014"); // 9 August 2014 was a Saturday
+        assert_eq!(week_date(2014, 2), "Sat 16 Aug 2014");
+        assert_eq!(week_date(2014, 25), "Sat 24 Jan 2015");
+        assert_eq!(week_date(2023, 1), "Sat 12 Aug 2023"); // 9 August 2023 was a Wednesday
+        assert_eq!(week_date(2015, 30), "Sat 5 Mar 2016"); // 2016 is a leap year: Feb has 29 days
     }
 
     #[test]

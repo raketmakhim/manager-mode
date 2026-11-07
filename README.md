@@ -9,7 +9,7 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 - Imports real FIFA player data (FIFA 15 to FC 24, 2014/15 to 2023/24) into one SQLite file
 - Loads any of those editions into the game: every league, club and squad, with the real attributes
 - Generates each league's season fixtures (everyone plays everyone home and away, at most 3 matches per club per week)
-- A window with a **Season** tab (start a season in any edition, browse fixtures by league, round or club) and a **Player scout** tab (search any player and see how their stats really changed in later editions)
+- A window with a **Career** tab (new career: pick a year, a league and a club, then see that club's fixtures with dates, cup draw included), a **League browser** tab (any league's fixtures by round or club) and a **Player scout** tab (search any player and see how their stats really changed in later editions)
 
 ## Planned features (v1)
 
@@ -23,7 +23,7 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 
 ## Later
 
-Youth academy, cups and European competitions, training drills, board objectives, save/load, real-time 2D match view, editions before FIFA 15.
+Youth academy, European competitions, training drills, board objectives, save/load, real-time 2D match view, editions before FIFA 15.
 
 ## Tech
 
@@ -40,7 +40,7 @@ cargo run -p import --release     # writes history.db (~46 MB, under a minute)
 Then open the window:
 
 ```
-cargo run -p gui --release        # tabs: Season and Player scout
+cargo run -p gui --release        # tabs: Career, League browser, Player scout
 cargo run -p tui --release        # the player scout in the terminal (Enter to open, Left/Right for seasons)
 cargo test                        # tests that need history.db skip themselves if it is missing
 ```
@@ -57,7 +57,7 @@ cargo run -p simtool --release    # bulk-simulate matches/seasons and print bala
 crates/
   import/    builds history.db from the CSVs
   engine/    game logic, no UI: attributes, world model, loading an edition, competitions and fixtures, match outcomes, player history
-  gui/       the window (egui): Season and Player scout tabs
+  gui/       the window (egui): Career, League browser and Player scout tabs
   tui/       the terminal player scout (ratatui)
   simtool/   (planned, M2) bulk simulation and balance reports
 research/    notes behind the decisions

@@ -54,7 +54,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - Play next round, update table, fitness and form
 - Lineup and formation screen (GUI)
 - League table screen (GUI); the fixtures screen already exists (Season tab)
-- Competition stages: **step 1 done** (types, `RoundRobin`, richer match `Outcome`); next `Knockout` with a seeded draw; `RoundRobin` (wrapping today's generator) and single-leg `Knockout` with a seeded draw, a shared standings function, then rules by season (see `research/engineering/competition-design.md`). League phase, split, groups and two-leg ties come later, each when a competition needs it
+- First game screen: a Career tab (new career, club fixtures with dates) is done. Competition stages: **steps 1-2 done** (types, `RoundRobin`, richer match `Outcome`, single-leg `Knockout` with a seeded draw and byes, a default cup per country, our own seeded `Rng`); next a shared standings function, then rules by season (see `research/engineering/competition-design.md`). League phase, split, groups and two-leg ties come later, each when a competition needs it
 - **Done when**: a full season can be played start to finish in the GUI
 
 ### M4 - Transfers and finance
