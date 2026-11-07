@@ -8,7 +8,7 @@
 //! - `outcome`: the result of a played match (full time, extra time, shootout).
 //! - `overall`: how overall is built from attributes, by position (weights; `overall_change`).
 //! - `rng`: the seeded random number generator every simulation takes.
-//! - `sim`: the cheap match simulation (team strength, goals, extra time, shootout).
+//! - `sim`: the match models (cheap: team strength to a score) behind one function, `simulate`.
 //! - `source`: building a `World` from history.db.
 mod attrs;
 mod competition;
@@ -38,6 +38,6 @@ pub use model::{
 pub use outcome::{Outcome, Side};
 pub use overall::{overall_change, weights};
 pub use rng::Rng;
-pub use sim::{simulate_match, team_strength};
+pub use sim::{simulate, team_strength, Event, MatchDetail, MatchInput, MatchModel, MatchReport, MatchTeam};
 pub use rusqlite::Connection;
 pub use source::{advance_ratings, editions, load_edition};

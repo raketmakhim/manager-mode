@@ -1,5 +1,6 @@
-//! The cheap match simulation: two team strengths and a seeded RNG in, an `Outcome` out.
-//! Pure functions, no `World`. Scorers and assisters come later as a second layer on the same goals.
+//! The cheap match model: two team strengths and a seeded RNG in, a score out. No events, no scorers.
+//! Pure functions, no `World`. Fast enough for every match of every league in the world.
+use super::{MatchInput, MatchReport};
 use crate::outcome::Outcome;
 use crate::rng::Rng;
 
@@ -19,6 +20,12 @@ const LOW_SCORE_CORRECTION: f64 = -0.10;
 /// Chance a penalty is scored.
 const PENALTY_SCORED: f64 = 0.75;
 
+/// Plays a match with the cheap model: each side's strength is the mean of its lineup's ratings.
+pub(super) fn simulate(input: &MatchInput, rng: &mut Rng) -> MatchReport {
+    let (home, away) = (team_strength(&input.home.ratings), team_strength(&input.away.ratings));
+    MatchReport { outcome: simulate_match(home, away, input.must_have_winner, rng), detail: None }
+}
+
 /// A team's strength: the mean of the best eleven ratings (0-99) given. Give it the lineup's ratings, each player
 /// rated in his slot (`World::lineup_ratings`), and an empty slot as 0. Fewer than eleven ratings: the mean of those
 /// given; none: 0.
@@ -31,7 +38,7 @@ pub fn team_strength(overalls: &[u8]) -> f64 {
 
 /// Plays one match. `must_have_winner` is true for a cup tie: a level score goes to 30 minutes of extra time
 /// and then to a shootout. A league match stays level.
-pub fn simulate_match(home: f64, away: f64, must_have_winner: bool, rng: &mut Rng) -> Outcome {
+fn simulate_match(home: f64, away: f64, must_have_winner: bool, rng: &mut Rng) -> Outcome {
     let edge = GOAL_RATE_PER_POINT * (home - away) / 2.0;
     let home_rate = BASE_GOALS * HOME_FACTOR * edge.exp();
     let away_rate = BASE_GOALS / HOME_FACTOR * (-edge).exp();

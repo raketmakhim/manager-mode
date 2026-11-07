@@ -1,18 +1,21 @@
 //! Playing fixtures: one match, one week, or everything up to a club's next match.
 use crate::model::{ClubId, World};
 use crate::rng::Rng;
-use crate::sim::{simulate_match, team_strength};
+use crate::sim::{simulate, MatchInput, MatchTeam};
 
 impl World {
-    /// Plays the fixture at `index` in `fixtures` and stores its result. Cup ties always get a winner.
-    // shortcut: recomputes both lineups' strength on every match (a whole-world season of about 10,000 matches takes
-    // 0.5 s in a release build, 10 s in debug); cache per club, cleared when ratings or squads change, when the
-    // simtool runs thousands of seasons.
+    /// Plays the fixture at `index` in `fixtures` with its competition's match model and stores the result. Cup ties
+    /// always get a winner.
+    // shortcut: recomputes both lineups on every match (a whole-world season of about 10,000 matches takes 0.5 s in a
+    // release build, 10 s in debug); cache per club, cleared when ratings or squads change, when the simtool runs
+    // thousands of seasons. The event detail of a full-model match is dropped here; keep it for the matches that
+    // matter (the user's club, the top competitions) once something shows it.
     pub fn play_fixture(&mut self, index: usize, rng: &mut Rng) {
         let f = &self.fixtures[index];
-        let cup = self.competitions[&f.competition].is_cup();
-        let outcome = simulate_match(self.strength(f.home), self.strength(f.away), cup, rng);
-        self.fixtures[index].result = Some(outcome);
+        let competition = &self.competitions[&f.competition];
+        let input = self.match_input(f.home, f.away, competition.is_cup());
+        let report = simulate(competition.rules.model, &input, rng);
+        self.fixtures[index].result = Some(report.outcome);
     }
 
     /// Plays every unplayed match of `week`, then draws any cup round that this completes.
@@ -54,9 +57,13 @@ impl World {
         Some(next)
     }
 
-    /// The club's strength for the cheap simulation: its lineup, each player rated in his slot.
-    fn strength(&self, club: ClubId) -> f64 {
-        team_strength(&self.lineup_ratings(club))
+    /// What a match model needs to know about the two clubs: their lineups, each player rated in his slot.
+    fn match_input(&self, home: ClubId, away: ClubId, must_have_winner: bool) -> MatchInput {
+        MatchInput {
+            home: MatchTeam { ratings: self.lineup_ratings(home) },
+            away: MatchTeam { ratings: self.lineup_ratings(away) },
+            must_have_winner,
+        }
     }
 }
 

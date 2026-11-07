@@ -23,6 +23,7 @@ pub use standings::{standings, TableRow};
 
 use crate::model::{ClubId, CompetitionId, World};
 use crate::rng::Rng;
+use crate::sim::MatchModel;
 
 /// A league or a cup: a set of clubs that play fixtures against each other under some rules.
 pub struct Competition {
@@ -61,12 +62,14 @@ pub struct Rules {
     /// How many of the bottom clubs drop to the division below at the end of the season. The same number come up
     /// from that division. 0 for a cup.
     pub relegated: u8,
+    /// How its matches are simulated.
+    pub model: MatchModel,
 }
 
 impl Rules {
     /// Everyone plays everyone home and away. The default for any league we have not researched.
     pub fn double_round_robin() -> Rules {
-        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED }
+        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED, model: MatchModel::Cheap }
     }
 }
 
@@ -127,14 +130,14 @@ mod tests {
     fn the_default_rules_make_a_league() {
         let c = Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), level: None, clubs: vec![] };
         assert!(c.is_league());
-        let cup_like = Rules { stages: vec![], relegated: 0 };
+        let cup_like = Rules { stages: vec![], relegated: 0, model: MatchModel::Cheap };
         assert!(!Competition { rules: cup_like, ..c }.is_league());
     }
 
     #[test]
     fn a_competition_that_is_not_a_league_gets_no_fixtures_up_front() {
         let mut w = World::new(0, 0);
-        let rules = Rules { stages: vec![], relegated: 0 };
+        let rules = Rules { stages: vec![], relegated: 0, model: MatchModel::Cheap };
         w.competitions.insert(1, Competition { id: 1, name: "C".into(), country: "X".into(), rules, level: None, clubs: vec![1, 2, 3, 4] });
         w.generate_fixtures();
         assert!(w.fixtures.is_empty());
