@@ -1,0 +1,8 @@
+[package]
+name = "import"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+csv = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
