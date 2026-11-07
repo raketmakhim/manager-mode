@@ -3,7 +3,7 @@
 Football manager-mode game (like FIFA Career Mode) in Rust. Simulation only: the user never plays a match.
 
 - Read [README.md](README.md) for the pitch and [PLAN.md](PLAN.md) for milestones (M1-M6) and decisions.
-- Layout: Cargo workspace. `crates/import` builds `history.db` from the CSVs, `crates/engine` is the game logic (no UI), `crates/gui` is the egui window, `crates/tui` the terminal view. `crates/simtool` is planned for M2.
+- Layout: Cargo workspace. `crates/import` builds `history.db` from the CSVs, `crates/engine` is the game logic (no UI), `crates/gui` is the egui window, `crates/tui` the terminal view. `dev-tools/simtool` simulates many seasons and prints balance numbers (`cargo run -p simtool --release`). Tools for developers live in `dev-tools/`, the game itself in `crates/`.
 - Rules: engine has no UI imports; every sim takes an explicit seeded `engine::Rng` (our own, not the `rand` crate); a new game is `load_edition` then `World::start_season`; the game gets its data through `engine::load_edition` (a trait only once a second source exists). The real data (CSVs and `history.db`) is never committed to the repo.
 - Calendar rule: a club plays at most 3 matches in any week; `World::calendar_problems()` must stay empty.
 - Competition rules depend on the season (formats changed between 2014 and 2023) and live in data. No per-country `match` in code. Design: `research/engineering/competition-design.md`.

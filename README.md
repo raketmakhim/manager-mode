@@ -45,10 +45,10 @@ cargo run -p tui --release        # the player scout in the terminal (Enter to o
 cargo test                        # tests that need history.db skip themselves if it is missing
 ```
 
-Coming with M2:
+Check the match simulation against real football (simulates many seasons of every league and prints goals per match, home win rate, how often the strongest club wins, and how long a season takes):
 
 ```
-cargo run -p simtool --release    # bulk-simulate matches/seasons and print balance stats
+cargo run -p simtool --release -- --edition 15 --seasons 20 --seed 1
 ```
 
 ## Project layout
@@ -59,6 +59,7 @@ crates/
   engine/    game logic, no UI: attributes, world model, loading an edition, competitions and fixtures, match outcomes, player history
   gui/       the window (egui): Career (fixtures, squad, competitions) and Player scout tabs
   tui/       the terminal player scout (ratatui)
-  simtool/   (planned, M2) bulk simulation and balance reports
+dev-tools/
+  simtool/   bulk simulation and balance reports (not part of the game)
 research/    notes behind the decisions
 ```

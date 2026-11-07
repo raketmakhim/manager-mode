@@ -37,7 +37,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 ## Milestones
 
 ### M1 - Foundations
-- Cargo workspace with `import`, `engine`, `gui`, `tui` crates (`simtool` comes with M2); `cargo test` running
+- Cargo workspace with `import`, `engine`, `gui`, `tui` crates (`dev-tools/simtool` for balance checks); `cargo test` running
 - Data model types (plain structs; `serde` derives are added with save/load in M5)
 - `load_edition`: clubs, players and ratings for one edition
 - Round-robin fixture generator with the weekly match limit
@@ -48,7 +48,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 ### M2 - Match simulation
 - Team strength from lineup (attributes by position, formation fit, fitness, form)
 - Minute-by-minute sim producing score, events (goals, cards, injuries) and commentary
-- `simtool` runs N matches/seasons in parallel (`rayon`) and prints win rates, goals per game, etc.
+- `dev-tools/simtool` simulates N seasons of every league and prints goals per match, home/draw/away shares, champion points and how often the strongest club wins. Done: one thread (0.5 s a season in release); add `rayon` when it gets slow. Still to do: tune the constants in `sim.rs` against real results (see `research/game-features/`).
 - **Done when**: stronger team wins noticeably more often over 100k simulated matches; same seed gives same result
 
 ### M3 - Season loop
