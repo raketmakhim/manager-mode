@@ -56,7 +56,7 @@ cargo run -p simtool --release    # bulk-simulate matches/seasons and print bala
 ```
 crates/
   import/    builds history.db from the CSVs
-  engine/    game logic, no UI: attributes, world model, loading an edition, fixtures, player history
+  engine/    game logic, no UI: attributes, world model, loading an edition, competitions and fixtures, match outcomes, player history
   gui/       the window (egui): Season and Player scout tabs
   tui/       the terminal player scout (ratatui)
   simtool/   (planned, M2) bulk simulation and balance reports

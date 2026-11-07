@@ -134,10 +134,11 @@ The league has up to about 56 leagues per edition, around 10,000 to 11,000 leagu
 
 ## Order of work
 
-1. `Stage` with two formats: `RoundRobin` (wrapping what exists) and single-leg `Knockout` with a seeded draw.
-2. Make league fixtures come out of a stage, plus the shared standings function.
-3. Rules-by-year lookup, with the top few countries written by hand.
-4. League phase, split, groups and two-leg ties, each when a competition needs it.
+1. **Done (2026-11-07):** `crates/engine/src/competition/` with `Competition`, `Rules`, `Stage`, `Format::RoundRobin` and `Entry::AllClubs`; `round_robin` and the calendar functions moved in unchanged; a richer match `Outcome` (full time, extra time, shootout) in `outcome.rs`. Built simpler than the sketch above: a `Competition` holds the `Rules` already resolved for its season (the year lookup comes in step 4), and `RoundRobin` has no `legs` parameter until a competition needs a single round-robin.
+2. `Knockout` with a seeded draw, added as a second `Format`.
+3. Make league fixtures come out of a stage state machine, plus the shared standings function.
+4. Rules-by-year lookup, with the top few countries written by hand.
+5. League phase, split, groups and two-leg ties, each when a competition needs it.
 
 ## Open questions
 

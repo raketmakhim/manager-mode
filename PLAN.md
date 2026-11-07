@@ -42,7 +42,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - Round-robin fixture generator with the weekly match limit
 - Real data import tool (separate from the game) that builds the SQLite reference DB from the yearly datasets; the dataset is not committed to the repo. **Done**: `crates/import` builds `history.db` from the Kaggle files (FIFA 15 to FC 24), design in `research/engineering/data-import.md`
 - **Done when**: tests confirm a generated league has valid fixtures (everyone plays everyone home and away)
-- **Status: done** except `simtool` (not needed until M2). The generated fictional source was dropped: real data replaces it. Built: `crates/import`, `crates/engine` (`attrs`, `model`, `source`, `fixtures`, `history`), `crates/gui` (Season and Player scout tabs), `crates/tui`
+- **Status: done** except `simtool` (not needed until M2). The generated fictional source was dropped: real data replaces it. Built: `crates/import`, `crates/engine` (`attrs`, `competition`, `history`, `model`, `outcome`, `source`), `crates/gui` (Season and Player scout tabs), `crates/tui`
 
 ### M2 - Match simulation
 - Team strength from lineup (attributes by position, formation fit, fitness, form)
@@ -54,7 +54,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - Play next round, update table, fitness and form
 - Lineup and formation screen (GUI)
 - League table screen (GUI); the fixtures screen already exists (Season tab)
-- Competition stages: `RoundRobin` (wrapping today's generator) and single-leg `Knockout` with a seeded draw, a shared standings function, then rules by season (see `research/engineering/competition-design.md`). League phase, split, groups and two-leg ties come later, each when a competition needs it
+- Competition stages: **step 1 done** (types, `RoundRobin`, richer match `Outcome`); next `Knockout` with a seeded draw; `RoundRobin` (wrapping today's generator) and single-leg `Knockout` with a seeded draw, a shared standings function, then rules by season (see `research/engineering/competition-design.md`). League phase, split, groups and two-leg ties come later, each when a competition needs it
 - **Done when**: a full season can be played start to finish in the GUI
 
 ### M4 - Transfers and finance

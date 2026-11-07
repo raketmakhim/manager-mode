@@ -2,9 +2,9 @@
 // shortcut: one plain function, not a `DataSource` trait. Make it a trait when a second source
 // (e.g. generated fictional leagues) exists to put behind it.
 use crate::attrs::{Attr, Attrs};
+use crate::competition::{Competition, Rules};
 use crate::model::*;
 use rusqlite::{Connection, Result};
-use std::collections::BTreeMap;
 
 /// The editions in the database, oldest first (15 = FIFA 15 ... 24 = FC 24).
 pub fn editions(conn: &Connection) -> Result<Vec<i64>> {
@@ -17,14 +17,8 @@ pub fn editions(conn: &Connection) -> Result<Vec<i64>> {
 pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
     conn.query_row("SELECT 1 FROM editions WHERE fifa_version = ?1", [version], |_| Ok(()))?;
 
-    let mut world = World {
-        edition: version,
-        year: (1999 + version) as u16, // FIFA 15 shipped in autumn 2014: the 2014/15 season
-        competitions: BTreeMap::new(),
-        clubs: BTreeMap::new(),
-        players: BTreeMap::new(),
-        fixtures: vec![],
-    };
+    // FIFA 15 shipped in autumn 2014: the 2014/15 season
+    let mut world = World::new(version, (1999 + version) as u16);
 
     let mut st = conn.prepare(
         "SELECT t.team_id AS id, t.team_name AS name, te.league_id AS league_id, l.league_name AS league_name,
@@ -56,7 +50,7 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
             id: club.league,
             name: league_name,
             country,
-            kind: CompetitionKind::League,
+            rules: Rules::double_round_robin(),
             clubs: vec![],
         });
         league.clubs.push(club.id);

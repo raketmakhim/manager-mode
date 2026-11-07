@@ -2,6 +2,8 @@
 //! (easy to save, and no borrowing puzzles). Unlike `Snapshot`, which is one read-only row of history,
 //! a `Player` here is the player right now and the simulation changes it.
 use crate::attrs::Attrs;
+use crate::competition::Competition;
+use crate::outcome::Outcome;
 use std::collections::BTreeMap;
 
 /// Same number as `player_id` in history.db, so we can look up a player's real future.
@@ -108,24 +110,6 @@ pub struct Club {
     pub lineup: Vec<PlayerId>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CompetitionKind {
-    /// Everyone plays everyone home and away; the whole schedule is known up front.
-    League,
-    /// Knockout. Not built yet. Each round can only be drawn once the last one is played.
-    Cup,
-}
-
-/// A league or a cup: a set of clubs that play fixtures against each other.
-pub struct Competition {
-    pub id: CompetitionId,
-    pub name: String,
-    /// Country, e.g. "England". Several countries have a league with the same name.
-    pub country: String,
-    pub kind: CompetitionKind,
-    pub clubs: Vec<ClubId>,
-}
-
 pub struct Fixture {
     pub competition: CompetitionId,
     /// Matchday within its competition: 1 = the first round of that league or cup.
@@ -135,8 +119,8 @@ pub struct Fixture {
     pub week: u8,
     pub home: ClubId,
     pub away: ClubId,
-    /// (home goals, away goals); `None` until played.
-    pub result: Option<(u8, u8)>,
+    /// `None` until played.
+    pub result: Option<Outcome>,
 }
 
 /// The whole game in one place. Ordered maps (not HashMap) so that looping over them gives the
@@ -150,4 +134,18 @@ pub struct World {
     pub clubs: BTreeMap<ClubId, Club>,
     pub players: BTreeMap<PlayerId, Player>,
     pub fixtures: Vec<Fixture>,
+}
+
+impl World {
+    /// An empty world for the given edition and season start year.
+    pub fn new(edition: i64, year: u16) -> World {
+        World {
+            edition,
+            year,
+            competitions: BTreeMap::new(),
+            clubs: BTreeMap::new(),
+            players: BTreeMap::new(),
+            fixtures: vec![],
+        }
+    }
 }

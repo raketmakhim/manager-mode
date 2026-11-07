@@ -1,7 +1,7 @@
 //! Season tab: pick an edition, start a season, browse the fixtures.
 use crate::RED;
 use eframe::egui::{self, RichText};
-use engine::{edition_label, editions, load_edition, season_label, ClubId, Competition, CompetitionId, CompetitionKind, Connection, World};
+use engine::{edition_label, editions, load_edition, season_label, ClubId, Competition, CompetitionId, Connection, World};
 
 pub struct Season {
     /// Editions in the database, oldest first.
@@ -94,7 +94,7 @@ impl Season {
             ui.add_space(6.0);
 
             let name = |id: ClubId| world.clubs[&id].name.as_str();
-            let result = |f: &engine::Fixture| f.result.map_or("-".to_string(), |(h, a)| format!("{h}-{a}"));
+            let result = |f: &engine::Fixture| f.result.map_or("-".to_string(), |o| o.to_string());
             match self.club {
                 None => {
                     ui.horizontal(|ui| {
@@ -144,7 +144,7 @@ impl Season {
 /// Leagues that have fixtures (two or more clubs), A to Z by name then country.
 fn sorted_leagues(world: &World) -> Vec<&Competition> {
     let mut v: Vec<&Competition> =
-        world.competitions.values().filter(|c| c.kind == CompetitionKind::League && c.clubs.len() >= 2).collect();
+        world.competitions.values().filter(|c| c.is_league() && c.clubs.len() >= 2).collect();
     v.sort_by(|a, b| (&a.name, &a.country).cmp(&(&b.name, &b.country)));
     v
 }
