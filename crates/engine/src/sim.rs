@@ -3,16 +3,19 @@
 use crate::outcome::Outcome;
 use crate::rng::Rng;
 
-// The three numbers below were tuned with `dev-tools/simtool` so the big five leagues (FIFA 15 ratings) match their
+// The numbers below were tuned with `dev-tools/simtool` so the big five leagues (FIFA 15 ratings) match their
 // real 2014/15 to 2023/24 tables: see `research/game-features/simulation-balance.md`. Rerun the simtool after
 // changing anything that moves ratings or goals.
 
 /// Goals a team is expected to score against an equal side away from home, before the home bonus.
 const BASE_GOALS: f64 = 1.29;
 /// Home side's goals are multiplied by this, the away side's divided by it.
-const HOME_FACTOR: f64 = 1.13;
+const HOME_FACTOR: f64 = 1.14;
 /// Each rating point of strength difference changes the goals by this share (as an exponent), split between the sides.
-const GOAL_RATE_PER_POINT: f64 = 0.135;
+const GOAL_RATE_PER_POINT: f64 = 0.14;
+/// Two independent goal counts make fewer draws than real football, where low scores cluster. This is the
+/// Dixon-Coles correction (rho): negative values make 0-0 and 1-1 likelier and 1-0 and 0-1 less likely.
+const LOW_SCORE_CORRECTION: f64 = -0.10;
 /// Chance a penalty is scored.
 const PENALTY_SCORED: f64 = 0.75;
 
@@ -32,13 +35,32 @@ pub fn simulate_match(home: f64, away: f64, must_have_winner: bool, rng: &mut Rn
     let edge = GOAL_RATE_PER_POINT * (home - away) / 2.0;
     let home_rate = BASE_GOALS * HOME_FACTOR * edge.exp();
     let away_rate = BASE_GOALS / HOME_FACTOR * (-edge).exp();
-    let full_time = (poisson(home_rate, rng), poisson(away_rate, rng));
+    let full_time = full_time_score(home_rate, away_rate, rng);
     if !must_have_winner || full_time.0 != full_time.1 {
         return Outcome { full_time, extra_time: None, shootout: None };
     }
     let extra = (poisson(home_rate / 3.0, rng), poisson(away_rate / 3.0, rng));
     let shootout = (extra.0 == extra.1).then(|| shootout(rng));
     Outcome { full_time, extra_time: Some(extra), shootout }
+}
+
+/// The score after 90 minutes. Draws two independent Poisson goal counts and keeps the pair with a probability
+/// that is higher for 0-0 and 1-1 and lower for 1-0 and 0-1 (rejection sampling, so it needs no tables).
+fn full_time_score(home_rate: f64, away_rate: f64, rng: &mut Rng) -> (u8, u8) {
+    let weight = |home: u8, away: u8| match (home, away) {
+        (0, 0) => 1.0 - home_rate * away_rate * LOW_SCORE_CORRECTION,
+        (0, 1) => 1.0 + home_rate * LOW_SCORE_CORRECTION,
+        (1, 0) => 1.0 + away_rate * LOW_SCORE_CORRECTION,
+        (1, 1) => 1.0 - LOW_SCORE_CORRECTION,
+        _ => 1.0,
+    };
+    let ceiling = [weight(0, 0), weight(0, 1), weight(1, 0), weight(1, 1), 1.0].into_iter().fold(0.0, f64::max);
+    loop {
+        let score = (poisson(home_rate, rng), poisson(away_rate, rng));
+        if rng.unit() * ceiling <= weight(score.0, score.1).max(0.0) {
+            return score;
+        }
+    }
 }
 
 /// Number of events with an average of `rate` per match (Knuth's method).
@@ -145,5 +167,21 @@ mod tests {
     fn the_same_seed_gives_the_same_match() {
         let play = |seed| simulate_match(75.0, 68.0, true, &mut Rng::new(seed));
         assert_eq!(play(4), play(4));
+    }
+
+    /// The chance two independent Poisson counts with these averages end level.
+    fn independent_draw_chance(home_rate: f64, away_rate: f64) -> f64 {
+        let pmf = |rate: f64, k: i32| (-rate).exp() * rate.powi(k) / (1..=k).map(|i| i as f64).product::<f64>();
+        (0..20).map(|k| pmf(home_rate, k) * pmf(away_rate, k)).sum()
+    }
+
+    #[test]
+    fn draws_are_more_common_than_independent_goal_counts_would_give() {
+        // Equal teams: the rates are the base goals with the home factor applied each way.
+        let (home_rate, away_rate) = (BASE_GOALS * HOME_FACTOR, BASE_GOALS / HOME_FACTOR);
+        let independent = independent_draw_chance(home_rate, away_rate);
+        let (_, draws, _) = tally(70.0, 70.0);
+        let simulated = draws as f64 / 5000.0;
+        assert!(simulated > independent + 0.015, "simulated {simulated:.3} against {independent:.3} without the correction");
     }
 }

@@ -55,7 +55,7 @@ Leicester's 81 points in 2015/16 (a 5000-to-1 title) is a useful check that upse
 - The tool plays league matches only: no cups, European matches or injuries, which also affect real results.
 - Real draws by league and season vary by a few points; with 10 seasons per league the real averages are stable to about 0.1 goals a match and a point or two of percentage.
 
-## After tuning (done 2026-11-07)
+## After the first tuning (2026-11-07, before the draw correction)
 
 Constants in `engine/src/sim.rs` changed to **0.135 per rating point, home factor 1.13, base 1.29 goals**. Found by scanning the rating-gap constant and then adjusting the base and the home factor to keep goals and home wins in place. 40 seasons from seed 1.
 
@@ -78,10 +78,26 @@ One lesson: tuning first to the "all leagues" row looked right (0.20 per point) 
 
 The champion, runner-up, 4th and last place points per match of the big five together now match the real table to within 0.02, and goals per match to 0.01.
 
-### What is still off
+### What was still off at that point
 
 - **Draws are about 2.3 points too rare and away wins about 1.7 too common** (22.8% and 32.2% against 25.1% and 30.5%). Two goal counts drawn independently produce fewer draws than real football, where low-scoring games cluster. Fixing this needs a change to the model (for example a Dixon-Coles style correction that raises 0-0 and 1-1), not another constant: raising the home factor lowers away wins but pushes home wins above 46%.
 - **Per-league goal rates.** The Bundesliga scores 3.02 a match in reality, La Liga 2.63 and Ligue 1 2.65; the simulation gives every league about 2.75. A league goal rate belongs in `Rules` once rules are data by country.
 - **Single seasons.** Individual leagues differ from their real averages by up to 0.13 points a match (Bundesliga champion 2.51 against 2.38, because Bayern are far ahead of FIFA 15's other clubs; Premier League 2.28 against 2.41). Those come from the ratings, which is expected, not from the constants.
 - **Real upsets.** The strongest club on paper wins the Premier League only 35% of the time in the simulation, and a top-3 club 80% of the time, so a Leicester 2015/16 stays possible. There is no real figure for this to compare with.
 - **Other editions.** Tuned on FIFA 15. A check with FC 24 ratings (20 seasons, big five together) gives 2.75 goals, 45.4 / 22.7 / 32.0 % home / draw / away and points per match of 2.28 (1st), 2.07 (2nd), 1.83 (4th) and 0.65 (last) against the real 2.37, 2.11, 1.83 and 0.63. So the tuning carries over; the champion is slightly low because FC 24 ratings are a little more compressed.
+
+## After the draw correction (2026-11-07)
+
+Added a Dixon-Coles low-score correction to `full_time_score` in `engine/src/sim.rs` (constant `LOW_SCORE_CORRECTION`, rho = -0.10): the two goal counts are still drawn from independent Poisson distributions, and a drawn pair is kept with a probability that is higher for 0-0 and 1-1 and lower for 1-0 and 0-1 (rejection sampling). Then the home factor went to **1.14** and the rating-gap constant to **0.14** to bring home wins and the table spread back. Final constants: **base 1.29 goals, home factor 1.14, 0.14 per rating point, rho -0.10**.
+
+A scan of rho (big five together, other constants as before): rho 0 gives 22.7% draws, -0.05 gives 23.8%, **-0.10 gives 25.2%**, -0.15 gives 25.8%, -0.20 gives 27.0%. Goals per match stayed at 2.77 throughout.
+
+| 40 seasons from seed 1 | Goals | Home % | Draw % | Away % | 1st | 2nd | 4th | Last |
+|---|---|---|---|---|---|---|---|---|
+| Real, big five | 2.77 | 44.4 | 25.1 | 30.5 | 2.37 | 2.11 | 1.83 | 0.63 |
+| Simulated, FIFA 15 ratings | 2.78 | 45.1 | 24.4 | 30.5 | 2.41 | 2.11 | 1.82 | 0.63 |
+| Simulated, FC 24 ratings (20 seasons) | 2.76 | 44.6 | 24.8 | 30.5 | 2.31 | 2.06 | 1.83 | 0.66 |
+
+Per league with FIFA 15 ratings (first / last place points per match against the real figure): Premier League 2.28 / 0.58 (real 2.41 / 0.59), Bundesliga 2.54 / 0.57 (2.38 / 0.65), La Liga 2.43 / 0.74 (2.37 / 0.67), Serie A 2.32 / 0.58 (2.36 / 0.56), Ligue 1 2.47 / 0.70 (2.35 / 0.66). Draws are 23.9% to 25.3% in each of the five (real 23.3% to 26.0%).
+
+Still off: goal rates are the same in every league (Bundesliga 3.02, La Liga 2.63 in reality), and single leagues follow their ratings (Bayern's lead over the Bundesliga in FIFA 15 gives a champion at 2.54).
