@@ -3,12 +3,16 @@
 use crate::outcome::Outcome;
 use crate::rng::Rng;
 
+// The three numbers below were tuned with `dev-tools/simtool` so the big five leagues (FIFA 15 ratings) match their
+// real 2014/15 to 2023/24 tables: see `research/game-features/simulation-balance.md`. Rerun the simtool after
+// changing anything that moves ratings or goals.
+
 /// Goals a team is expected to score against an equal side away from home, before the home bonus.
-const BASE_GOALS: f64 = 1.35;
+const BASE_GOALS: f64 = 1.29;
 /// Home side's goals are multiplied by this, the away side's divided by it.
-const HOME_FACTOR: f64 = 1.15;
+const HOME_FACTOR: f64 = 1.13;
 /// Each rating point of strength difference changes the goals by this share (as an exponent), split between the sides.
-const GOAL_RATE_PER_POINT: f64 = 0.06;
+const GOAL_RATE_PER_POINT: f64 = 0.135;
 /// Chance a penalty is scored.
 const PENALTY_SCORED: f64 = 0.75;
 

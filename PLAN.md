@@ -48,7 +48,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 ### M2 - Match simulation
 - Team strength from lineup (attributes by position, formation fit, fitness, form)
 - Minute-by-minute sim producing score, events (goals, cards, injuries) and commentary
-- `dev-tools/simtool` simulates N seasons of every league and prints goals per match, home/draw/away shares, champion points and how often the strongest club wins. Done: one thread (0.5 s a season in release); add `rayon` when it gets slow. Still to do: tune the constants in `sim.rs` against real results (see `research/game-features/`).
+- `dev-tools/simtool` simulates N seasons of every league and prints goals per match, home/draw/away shares, champion points and how often the strongest club wins. Done: one thread (0.5 s a season in release); add `rayon` when it gets slow. The constants in `sim.rs` are tuned to the real big-five tables (`research/game-features/simulation-balance.md`); still off: draws are 2 points too rare (needs a Dixon-Coles style correction), league goal rates are not per country, only FIFA 15 was tuned.
 - **Done when**: stronger team wins noticeably more often over 100k simulated matches; same seed gives same result
 
 ### M3 - Season loop

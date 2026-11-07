@@ -50,8 +50,11 @@ struct LeagueSeason {
     home_wins: u32,
     draws: u32,
     away_wins: u32,
-    /// Points per match the champion collected.
-    champion_points_per_match: f64,
+    /// Points per match of the champion, the runner-up, the 4th club and the last club.
+    champion: f64,
+    runner_up: f64,
+    fourth: f64,
+    last: f64,
     /// 1 = the champion was the strongest club of the league on paper.
     champion_strength_rank: usize,
 }
@@ -76,7 +79,10 @@ impl Totals {
         self.season.home_wins += s.home_wins;
         self.season.draws += s.draws;
         self.season.away_wins += s.away_wins;
-        self.season.champion_points_per_match += s.champion_points_per_match;
+        self.season.champion += s.champion;
+        self.season.runner_up += s.runner_up;
+        self.season.fourth += s.fourth;
+        self.season.last += s.last;
         self.strongest_won += (s.champion_strength_rank == 1) as u32;
         self.top_three_won += (s.champion_strength_rank <= 3) as u32;
     }
@@ -86,13 +92,16 @@ impl Totals {
         let matches = s.matches.max(1) as f64;
         let share = |count: u32| 100.0 * count as f64 / matches;
         format!(
-            "{label:<28} {:>3.0} clubs {:>6.2} goals {:>5.1}% home {:>5.1}% draw {:>5.1}% away {:>5.2} champion pts/match {:>5.1}% strongest wins {:>5.1}% top-3 wins",
+            "{label:<26} {:>3.0} clubs {:>5.2} goals {:>5.1}% home {:>5.1}% draw {:>5.1}% away | points/match: 1st {:>4.2} 2nd {:>4.2} 4th {:>4.2} last {:>4.2} | strongest wins {:>3.0}% top-3 wins {:>3.0}%",
             (self.club_count as f64 / n).round(),
             s.goals as f64 / matches,
             share(s.home_wins),
             share(s.draws),
             share(s.away_wins),
-            s.champion_points_per_match / n,
+            s.champion / n,
+            s.runner_up / n,
+            s.fourth / n,
+            s.last / n,
             100.0 * self.strongest_won as f64 / n,
             100.0 * self.top_three_won as f64 / n,
         )
@@ -114,17 +123,22 @@ fn measure(world: &World, league: &Competition) -> LeagueSeason {
         }
     }
     let table = world.table(league.id);
+    let per_match = |place: usize| table[place].points as f64 / table[place].played.max(1) as f64;
+    season.champion = per_match(0);
+    season.runner_up = per_match(1);
+    season.fourth = per_match(3);
+    season.last = per_match(table.len() - 1);
     let champion = &table[0];
-    season.champion_points_per_match = champion.points as f64 / champion.played.max(1) as f64;
     let strength = |club: ClubId| team_strength(&world.lineup_ratings(club));
     let champion_strength = strength(champion.club);
     season.champion_strength_rank = 1 + league.clubs.iter().filter(|&&c| strength(c) > champion_strength).count();
     season
 }
 
-/// Plays `seasons` seasons of every league and returns the totals: all leagues together first, then the big five.
+/// Plays `seasons` seasons of every league and returns the totals: all leagues together, the big five together,
+/// then each of the big five.
 fn run(world: &mut World, options: &Options) -> Vec<(String, Totals)> {
-    let mut all = Totals::default();
+    let (mut all, mut big_five) = (Totals::default(), Totals::default());
     let mut big: Vec<(String, Totals)> = BIG_LEAGUES.iter().map(|(name, country)| (format!("{name} ({country})"), Totals::default())).collect();
     for season in 0..options.seasons {
         let mut rng = Rng::new(options.seed + season);
@@ -136,10 +150,11 @@ fn run(world: &mut World, options: &Options) -> Vec<(String, Totals)> {
             let name = (league.name.as_str(), league.country.as_str());
             if let Some(i) = BIG_LEAGUES.iter().position(|&l| l == name) {
                 big[i].1.add(league.clubs.len(), &result);
+                big_five.add(league.clubs.len(), &result);
             }
         }
     }
-    let mut totals = vec![("All leagues of 8+ clubs".to_string(), all)];
+    let mut totals = vec![("All leagues of 8+ clubs".to_string(), all), ("The big five together".to_string(), big_five)];
     totals.extend(big.into_iter().filter(|(_, t)| t.seasons > 0));
     totals
 }
