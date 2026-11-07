@@ -19,55 +19,45 @@ pub const FULL_FITNESS: u8 = 100;
 /// The most matches a club may play in one week (a 7-day block of the season).
 pub const MAX_MATCHES_PER_WEEK: usize = 3;
 
-/// Where a player can play. Grouped goalkeeper, defence, midfield, attack; inside each group left to right
-/// (centre positions deepest first).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Position {
-    Gk,
+/// Defines `Position` plus its short code and `parse` in one place, so the three cannot drift apart.
+/// Each line is: variant name, code as written in the data. Grouped goalkeeper, defence, midfield, attack; inside
+/// each group left to right (centre positions deepest first).
+macro_rules! positions {
+    ($($name:ident $code:literal),* $(,)?) => {
+        /// Where a player can play, e.g. `Position::St`.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Position { $($name),* }
 
-    Lwb,
-    Lb,
-    Cb,
-    Rb,
-    Rwb,
-
-    Lm,
-    Cdm,
-    Cm,
-    Cam,
-    Rm,
-
-    Lw,
-    Cf,
-    St,
-    Rw,
+        impl Position {
+            /// Every position, in the order they are listed below.
+            pub const ALL: &'static [Position] = &[$(Position::$name),*];
+            /// Short code, e.g. "ST".
+            pub fn code(self) -> &'static str { match self { $(Position::$name => $code),* } }
+            /// "ST" -> `Some(Position::St)`; anything else is `None`.
+            pub fn parse(s: &str) -> Option<Position> { match s { $($code => Some(Position::$name),)* _ => None } }
+        }
+    };
 }
 
-impl Position {
-    /// "ST" -> `Some(Position::St)`; anything else is `None`.
-    pub fn parse(s: &str) -> Option<Position> {
-        Some(match s {
-            "GK" => Position::Gk,
+positions! {
+    Gk  "GK",
 
-            "LWB" => Position::Lwb,
-            "LB" => Position::Lb,
-            "CB" => Position::Cb,
-            "RB" => Position::Rb,
-            "RWB" => Position::Rwb,
+    Lwb "LWB",
+    Lb  "LB",
+    Cb  "CB",
+    Rb  "RB",
+    Rwb "RWB",
 
-            "LM" => Position::Lm,
-            "CDM" => Position::Cdm,
-            "CM" => Position::Cm,
-            "CAM" => Position::Cam,
-            "RM" => Position::Rm,
+    Lm  "LM",
+    Cdm "CDM",
+    Cm  "CM",
+    Cam "CAM",
+    Rm  "RM",
 
-            "LW" => Position::Lw,
-            "CF" => Position::Cf,
-            "ST" => Position::St,
-            "RW" => Position::Rw,
-            _ => return None,
-        })
-    }
+    Lw  "LW",
+    Cf  "CF",
+    St  "ST",
+    Rw  "RW",
 }
 
 pub struct Player {
@@ -181,5 +171,19 @@ impl World {
             players: BTreeMap::new(),
             fixtures: vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_position_code_parses_back_to_itself() {
+        assert_eq!(Position::ALL.len(), 15);
+        for &position in Position::ALL {
+            assert_eq!(Position::parse(position.code()), Some(position));
+        }
+        assert_eq!(Position::parse("XX"), None);
     }
 }

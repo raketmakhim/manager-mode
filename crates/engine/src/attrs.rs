@@ -14,6 +14,8 @@ macro_rules! attrs {
             pub const ALL: &'static [Attr] = &[$(Attr::$name),*];
             /// Name shown on screen, e.g. "Short passing".
             pub fn label(self) -> &'static str { match self { $(Attr::$name => $label),* } }
+            /// Group it belongs to, the start of its column name: "attacking", "skill", "goalkeeping"...
+            pub fn category(self) -> &'static str { self.column().split('_').next().unwrap_or("") }
             /// Column in the `ratings` table, e.g. "attacking_short_passing".
             pub fn column(self) -> &'static str { match self { $(Attr::$name => $col),* } }
         }
@@ -139,6 +141,30 @@ impl Attrs {
     }
 }
 
+/// A rating after the real game changed it from `before` to `after`: the current rating moves by the same amount,
+/// kept inside 0-99. A player nobody touched ends exactly on the real `after`; one whose rating drifted (trained
+/// up, left on the bench) keeps the difference. This is how the player can make or break someone.
+pub fn follow_real_change(current: u8, before: u8, after: u8) -> u8 {
+    (current as i16 + after as i16 - before as i16).clamp(0, 99) as u8
+}
+
+impl Attrs {
+    /// Every attribute follows the real change from `before` to `after` (see `follow_real_change`). An attribute
+    /// the old edition did not have takes the new real value; one the new edition lacks stays as it is.
+    pub(crate) fn follow_real_change(&self, before: &Attrs, after: &Attrs) -> Attrs {
+        let mut next = *self;
+        for &a in Attr::ALL {
+            next.0[a as usize] = match (self[a], before[a], after[a]) {
+                (Some(now), Some(was), Some(will_be)) => Some(follow_real_change(now, was, will_be)),
+                (_, _, Some(will_be)) => Some(will_be),
+                (now, _, None) => now,
+            };
+        }
+        next
+    }
+}
+
+
 impl Default for Attrs {
     fn default() -> Self { Attrs([None; COUNT]) } // arrays this long have no derived Default
 }
@@ -153,11 +179,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn each_list_keeps_a_category_together() {
+        for list in [OUTFIELD, KEEPER] {
+            let groups: Vec<&str> = list.chunk_by(|a, b| a.category() == b.category()).map(|g| g[0].category()).collect();
+            let mut sorted = groups.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(groups.len(), sorted.len(), "a category is split in two: {groups:?}");
+        }
+    }
+
+    #[test]
+    fn an_attribute_knows_its_category() {
+        assert_eq!(Attr::Finishing.category(), "attacking");
+        assert_eq!(Attr::GkDiving.category(), "goalkeeping");
+        assert_eq!(Attr::StandingTackle.category(), "defending");
+    }
+
+    #[test]
     fn every_attr_is_in_exactly_one_list() {
         for &a in Attr::ALL {
             let n = OUTFIELD.iter().chain(KEEPER).filter(|&&x| x == a).count();
             assert_eq!(n, 1, "{a:?} appears {n} times across OUTFIELD and KEEPER");
         }
         assert_eq!(OUTFIELD.len() + KEEPER.len(), COUNT);
+    }
+
+    #[test]
+    fn a_rating_follows_the_real_change_and_keeps_its_drift() {
+        assert_eq!(follow_real_change(70, 70, 75), 75, "untouched player lands on the real rating");
+        assert_eq!(follow_real_change(78, 70, 75), 83, "a player trained up by 8 keeps the 8");
+        assert_eq!(follow_real_change(65, 70, 75), 70, "one left to decline keeps the gap");
+        assert_eq!(follow_real_change(97, 90, 95), 99, "never above 99");
+        assert_eq!(follow_real_change(3, 40, 30), 0, "never below 0");
+    }
+
+    #[test]
+    fn attributes_follow_the_real_change_and_fill_in_new_ones() {
+        let mut before = Attrs::default();
+        let mut after = Attrs::default();
+        let mut now = Attrs::default();
+        before.0[Attr::Finishing as usize] = Some(70);
+        after.0[Attr::Finishing as usize] = Some(74);
+        now.0[Attr::Finishing as usize] = Some(72);
+        after.0[Attr::Composure as usize] = Some(60); // not in the old edition
+        now.0[Attr::Heading as usize] = Some(80); // not in the new edition
+        let next = now.follow_real_change(&before, &after);
+        assert_eq!(next[Attr::Finishing], Some(76));
+        assert_eq!(next[Attr::Composure], Some(60));
+        assert_eq!(next[Attr::Heading], Some(80));
     }
 }

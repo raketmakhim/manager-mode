@@ -5,6 +5,7 @@
 //! - `history`: reading real player history out of history.db.
 //! - `model`: the live game state (`World`, `Club`, `Player`...).
 //! - `outcome`: the result of a played match (full time, extra time, shootout).
+//! - `overall`: how overall is built from attributes, by position (weights; `overall_change`).
 //! - `rng`: the seeded random number generator every simulation takes.
 //! - `sim`: the cheap match simulation (team strength, goals, extra time, shootout).
 //! - `source`: building a `World` from history.db.
@@ -13,6 +14,7 @@ mod competition;
 mod history;
 mod model;
 mod outcome;
+mod overall;
 mod rng;
 mod sim;
 mod source;
@@ -25,7 +27,8 @@ pub use model::{
     NEUTRAL_FORM,
 };
 pub use outcome::{Outcome, Side};
+pub use overall::{overall_change, weights};
 pub use rng::Rng;
 pub use sim::{simulate_match, team_strength};
 pub use rusqlite::Connection;
-pub use source::{editions, load_edition};
+pub use source::{advance_ratings, editions, load_edition};

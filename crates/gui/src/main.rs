@@ -4,6 +4,7 @@ mod career;
 mod competitions;
 mod fixtures;
 mod scout;
+mod squad;
 mod season;
 
 use eframe::egui::{self, Color32};

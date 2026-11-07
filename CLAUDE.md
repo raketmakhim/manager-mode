@@ -25,6 +25,6 @@ Easy to read, no repeated code, nothing clever.
 - **Tests state rules, not output.** Prefer properties ("no club plays twice in a round", `calendar_problems()` is empty) that hold for every format. Exact numbers only as a few anchors (64 clubs give 63 matches).
 - **Small steps.** Each change does one thing and leaves all tests passing.
 
-Before every commit run `cargo clippy --workspace --all-targets` and `cargo test`. The `OUTFIELD` and `KEEPER` lists and the `Position` enum use blank lines between groups on purpose, so do not run `cargo fmt` over `engine/src/attrs.rs` and `model.rs` until `#[rustfmt::skip]` is added to them.
+Before every commit run `cargo clippy --workspace --all-targets` and `cargo test`. The `OUTFIELD` and `KEEPER` lists and the `Position` enum use blank lines between groups on purpose, so do not run `cargo fmt` over `engine/src/attrs.rs` and `model.rs` until `#[rustfmt::skip]` is added to them (`overall.rs` already has it).
 
 - **Line endings are LF** (`.gitattributes`). When a script rewrites a text file on Windows, open it with `newline="\n"` (Python) or write bytes, because the default turns every line into CRLF and makes the whole file show as changed in `git diff`.

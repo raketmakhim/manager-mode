@@ -1,8 +1,9 @@
 //! Career tab: start a new career (pick a year, a league and a club), then see that club's fixtures and dates.
 use crate::season::{league_label, sorted_leagues};
+use crate::squad::{self, Checkpoint};
 use crate::{competitions, fixtures, RED};
 use eframe::egui;
-use engine::{edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, World};
+use engine::{advance_ratings, edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, World};
 
 pub struct Career {
     /// Editions in the database, oldest first.
@@ -18,6 +19,9 @@ pub struct Career {
     view: View,
     /// The competition shown in the Competitions view; `None` means your own league.
     competition: Option<CompetitionId>,
+    /// Your squad's ratings at the start of each season so far, for the squad view.
+    checkpoints: Vec<Checkpoint>,
+    squad: squad::State,
     /// Seeded when the career starts; every simulated match draws from it.
     rng: Rng,
     /// The result of the last match you played, for the line next to the button.
@@ -28,7 +32,7 @@ pub struct Career {
 impl Career {
     pub fn new(conn: &Connection) -> Self {
         let editions = editions(conn).unwrap_or_default();
-        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, rng: Rng::new(0), last_played: None, error: None }
+        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, checkpoints: vec![], squad: squad::State::default(), rng: Rng::new(0), last_played: None, error: None }
     }
 
     /// Loads the picked edition and selects the first league and club.
@@ -53,14 +57,15 @@ impl Career {
 
     /// Draws the season's fixtures; the seed makes the cup draw the same for the same edition.
     fn start(&mut self) {
-        if let Some(world) = &mut self.world {
-            self.rng = Rng::new(self.edition as u64);
-            self.last_played = None;
-            self.competition = None;
-            self.view = View::Fixtures;
-            world.start_season(&mut self.rng);
-            self.started = true;
-        }
+        let (Some(world), Some(club)) = (&mut self.world, self.club) else { return };
+        self.rng = Rng::new(self.edition as u64);
+        self.last_played = None;
+        self.competition = None;
+        self.view = View::Fixtures;
+        world.start_season(&mut self.rng);
+        self.checkpoints = vec![Checkpoint::of_squad(world, club, season_name(world.year))];
+        self.squad = squad::State::default();
+        self.started = true;
     }
 
     /// Plays the club's next match (and everything before it in the league and cups) and remembers its result.
@@ -84,9 +89,15 @@ impl Career {
     }
 
     /// Promotion and relegation, then the next season's fixtures. Says what happened to your club.
-    fn start_next_season(&mut self, club: ClubId) {
+    fn start_next_season(&mut self, club: ClubId, conn: &Connection) {
         let Some(world) = &mut self.world else { return };
         let Some(moves) = world.start_next_season(&mut self.rng) else { return };
+        let ratings = match advance_ratings(conn, world) {
+            Ok(true) => "Player ratings updated to the real new season.",
+            Ok(false) => "No newer data: player ratings are unchanged.",
+            Err(_) => "Could not read the new ratings.",
+        };
+        self.checkpoints.push(Checkpoint::of_squad(world, club, season_name(world.year)));
         let mine = moves.iter().find(|m| m.club == club);
         let text = match mine {
             Some(m) => {
@@ -95,7 +106,7 @@ impl Career {
             }
             _ => "Your club stays in its division.".to_string(),
         };
-        self.last_played = Some(format!("{} clubs changed division. {text}", moves.len()));
+        self.last_played = Some(format!("{} clubs changed division. {text} {ratings}", moves.len()));
         self.competition = None;
     }
 
@@ -184,7 +195,7 @@ impl Career {
                 self.finish_season();
             }
             if ui.add_enabled(finished, egui::Button::new("Start next season")).clicked() {
-                self.start_next_season(club_id);
+                self.start_next_season(club_id, conn);
             }
             if ui.button("New career").clicked() {
                 self.started = false;
@@ -199,11 +210,13 @@ impl Career {
 
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.view, View::Fixtures, "My fixtures");
+            ui.selectable_value(&mut self.view, View::Squad, "My squad");
             ui.selectable_value(&mut self.view, View::Competitions, "Competitions");
         });
         ui.add_space(6.0);
         match self.view {
             View::Fixtures => fixtures::ui(ui, world, club_id),
+            View::Squad => squad::ui(ui, world, club_id, &self.checkpoints, &mut self.squad),
             View::Competitions => competitions::ui(ui, world, club_id, &mut self.competition),
         }
     }
@@ -214,6 +227,7 @@ impl Career {
 enum View {
     Fixtures,
     Competitions,
+    Squad,
 }
 
 #[cfg(test)]

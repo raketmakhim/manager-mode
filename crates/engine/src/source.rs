@@ -1,10 +1,11 @@
 //! Building a `World` from history.db: "start a career in FIFA 15".
 // shortcut: one plain function, not a `DataSource` trait. Make it a trait when a second source
 // (e.g. generated fictional leagues) exists to put behind it.
-use crate::attrs::{Attr, Attrs};
+use crate::attrs::{follow_real_change, Attr, Attrs};
 use crate::competition::{Competition, Rules};
 use crate::model::*;
 use rusqlite::{Connection, Result};
+use std::collections::HashMap;
 
 /// The editions in the database, oldest first (15 = FIFA 15 ... 24 = FC 24).
 pub fn editions(conn: &Connection) -> Result<Vec<i64>> {
@@ -98,6 +99,66 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
     Ok(world)
 }
 
+/// One player's real ratings in one edition.
+struct Ratings {
+    overall: u8,
+    potential: u8,
+    wage: u32,
+    value: u32,
+    contract_until: Option<u16>,
+    attrs: Attrs,
+}
+
+/// Every player's real ratings in one edition, by player id.
+fn read_ratings(conn: &Connection, version: i64) -> Result<HashMap<PlayerId, Ratings>> {
+    let sql = format!(
+        "SELECT r.player_id AS id, r.overall AS overall, r.potential AS potential, r.wage_eur AS wage,
+                r.value_eur AS value, r.club_contract_valid_until_year AS contract_until, {}
+         FROM ratings r WHERE r.fifa_version = ?1",
+        Attr::select_list()
+    );
+    let mut st = conn.prepare(&sql)?;
+    let rows = st.query_map([version], |r| {
+        Ok((
+            r.get::<_, PlayerId>("id")?,
+            Ratings {
+                overall: r.get::<_, Option<u8>>("overall")?.unwrap_or(0),
+                potential: r.get::<_, Option<u8>>("potential")?.unwrap_or(0),
+                wage: r.get::<_, Option<u32>>("wage")?.unwrap_or(0),
+                value: r.get::<_, Option<u32>>("value")?.unwrap_or(0),
+                contract_until: r.get("contract_until")?,
+                attrs: Attrs::from_row(r)?,
+            },
+        ))
+    })?;
+    rows.collect()
+}
+
+/// Moves every player on to the next edition's real ratings: how the real game changed each rating between this
+/// edition and the next is added to the player's current rating (see `follow_real_change`), so a player the user
+/// has trained or neglected keeps that difference. Wage, value and contract are replaced by the real ones.
+/// Returns false, and changes nothing, when there is no next edition (the data ends at FC 24).
+// shortcut: clubs keep their squads (real transfers are not followed), a player missing from the next edition keeps
+// his ratings, and the user's contracts are overwritten like everyone's. Upgrade when transfers and contract
+// renewals exist.
+pub fn advance_ratings(conn: &Connection, world: &mut World) -> Result<bool> {
+    let next = world.edition + 1;
+    if !editions(conn)?.contains(&next) {
+        return Ok(false);
+    }
+    let (before, after) = (read_ratings(conn, world.edition)?, read_ratings(conn, next)?);
+    for p in world.players.values_mut() {
+        let (Some(was), Some(will_be)) = (before.get(&p.id), after.get(&p.id)) else { continue };
+        p.overall = follow_real_change(p.overall, was.overall, will_be.overall);
+        p.potential = follow_real_change(p.potential, was.potential, will_be.potential);
+        p.attrs = p.attrs.follow_real_change(&was.attrs, &will_be.attrs);
+        (p.wage, p.value, p.contract_until) = (will_be.wage, will_be.value, will_be.contract_until);
+    }
+    world.edition = next;
+    Ok(true)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +219,29 @@ mod tests {
     fn unknown_edition_is_an_error() {
         let Some(conn) = db() else { return };
         assert!(load_edition(&conn, 99).is_err());
+    }
+
+    #[test]
+    fn advancing_gives_real_ratings_to_untouched_players_and_keeps_a_trained_players_gain() {
+        let Some(conn) = db() else { return };
+        let mut w = load_edition(&conn, 15).unwrap();
+        let rooney = 54050;
+        w.players.get_mut(&rooney).unwrap().overall += 4; // trained up by the user
+        let untouched = *w.players.keys().find(|&&id| id != rooney && w.players[&id].overall < 90).unwrap();
+        assert!(advance_ratings(&conn, &mut w).unwrap());
+        assert_eq!(w.edition, 16);
+
+        let real16 = read_ratings(&conn, 16).unwrap();
+        assert_eq!(w.players[&untouched].overall, real16[&untouched].overall);
+        assert_eq!(w.players[&rooney].overall, real16[&rooney].overall + 4);
+        assert_eq!(w.players[&rooney].wage, real16[&rooney].wage);
+    }
+
+    #[test]
+    fn there_is_nothing_to_advance_to_after_the_last_edition() {
+        let Some(conn) = db() else { return };
+        let mut w = World::new(24, 2023);
+        assert!(!advance_ratings(&conn, &mut w).unwrap());
+        assert_eq!(w.edition, 24);
     }
 }
