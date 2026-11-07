@@ -22,7 +22,7 @@ const PENALTY_SCORED: f64 = 0.75;
 
 /// Plays a match with the cheap model: each side's strength is the mean of its lineup's ratings.
 pub(super) fn simulate(input: &MatchInput, rng: &mut Rng) -> MatchReport {
-    let (home, away) = (team_strength(&input.home.ratings), team_strength(&input.away.ratings));
+    let (home, away) = (team_strength(&input.home.ratings()), team_strength(&input.away.ratings()));
     MatchReport { outcome: simulate_match(home, away, input.must_have_winner, rng), detail: None }
 }
 
@@ -71,7 +71,7 @@ fn full_time_score(home_rate: f64, away_rate: f64, rng: &mut Rng) -> (u8, u8) {
 }
 
 /// Number of events with an average of `rate` per match (Knuth's method).
-fn poisson(rate: f64, rng: &mut Rng) -> u8 {
+pub(super) fn poisson(rate: f64, rng: &mut Rng) -> u8 {
     let limit = (-rate).exp();
     let mut count = 0;
     let mut product = rng.unit();
@@ -83,7 +83,7 @@ fn poisson(rate: f64, rng: &mut Rng) -> u8 {
 }
 
 /// Five penalties each, then one more each until the scores differ. Never level.
-fn shootout(rng: &mut Rng) -> (u8, u8) {
+pub(super) fn shootout(rng: &mut Rng) -> (u8, u8) {
     let mut kicks = |n| (0..n).filter(|_| rng.unit() < PENALTY_SCORED).count() as u8;
     let (mut home, mut away) = (kicks(5), kicks(5));
     while home == away {

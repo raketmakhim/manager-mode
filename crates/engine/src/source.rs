@@ -52,10 +52,10 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
         let (club, league_name, country, level) = club?;
         let league = world.competitions.entry(club.league).or_insert_with(|| Competition {
             id: club.league,
+            rules: Rules::for_league(&league_name, &country),
             name: league_name,
             country,
             level,
-            rules: Rules::double_round_robin(),
             clubs: vec![],
         });
         league.clubs.push(club.id);

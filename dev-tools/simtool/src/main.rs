@@ -1,31 +1,25 @@
 //! simtool: simulates many league seasons and prints how the results are spread, so the match simulation can be
 //! checked and tuned against real football without opening the game.
 //!
-//! Usage: simtool [--edition 15] [--seasons 20] [--seed 1] [--db history.db]
-//! Every season starts from the same edition and plays every league (no cups, no promotion), with a different seed.
-use engine::{load_edition, team_strength, ClubId, Competition, Connection, Rng, World};
+//! Usage: simtool [--edition 15] [--seasons 20] [--seed 1] [--model cheap|shot-based] [--db history.db]
+//! Every season starts from the same edition and plays every league (no cups, no promotion) with the chosen match
+//! model, with a different seed. With the shot-based model it also counts the events (shots, cards, corners...).
+use engine::{load_edition, simulate, team_strength, ClubId, Competition, Connection, Event, MatchModel, Rng, World, TOP_FIVE_LEAGUES};
 use std::time::Instant;
-
-/// Leagues printed one by one, as (name, country). All leagues are printed together as well.
-const BIG_LEAGUES: [(&str, &str); 5] = [
-    ("Premier League", "England"),
-    ("Bundesliga", "Germany"),
-    ("La Liga", "Spain"),
-    ("Serie A", "Italy"),
-    ("Ligue 1", "France"),
-];
 
 struct Options {
     db: String,
     edition: i64,
     seasons: u64,
     seed: u64,
+    /// Plays every league with this model; `None` leaves each league to its own rules.
+    model: Option<MatchModel>,
 }
 
 impl Options {
     /// Reads `--name value` pairs. Anything unknown or missing a value is an error message.
     fn parse(args: &[String]) -> Result<Options, String> {
-        let mut options = Options { db: "history.db".into(), edition: 15, seasons: 20, seed: 1 };
+        let mut options = Options { db: "history.db".into(), edition: 15, seasons: 20, seed: 1, model: None };
         let mut args = args.iter();
         while let Some(name) = args.next() {
             let value = args.next().ok_or(format!("{name} needs a value"))?;
@@ -35,6 +29,11 @@ impl Options {
                 "--edition" => options.edition = number("--edition")? as i64,
                 "--seasons" => options.seasons = number("--seasons")?,
                 "--seed" => options.seed = number("--seed")?,
+                "--model" => options.model = match value.as_str() {
+                    "cheap" => Some(MatchModel::Cheap),
+                    "shot-based" => Some(MatchModel::ShotBased),
+                    _ => return Err(format!("--model must be cheap or shot-based, got {value}")),
+                },
                 _ => return Err(format!("unknown option {name}")),
             }
         }
@@ -59,9 +58,91 @@ struct LeagueSeason {
     champion_strength_rank: usize,
 }
 
+/// What happened in the events of a set of matches, added up. All zero for a model without detail.
+#[derive(Default)]
+struct EventStats {
+    matches: u32,
+    shots: u32,
+    on_target: u32,
+    corners: u32,
+    fouls: u32,
+    yellows: u32,
+    reds: u32,
+    /// Sum of the home side's possession in percent.
+    home_possession: u32,
+    /// Goals in the first half (minute 45 or earlier).
+    first_half_goals: u32,
+    goals: u32,
+}
+
+impl EventStats {
+    /// Plays every league fixture once more with its league's model and counts its events, to check the model's detail.
+    fn measure(world: &World, league: &Competition, rng: &mut Rng) -> EventStats {
+        let mut stats = EventStats::default();
+        for f in world.fixtures.iter().filter(|f| f.competition == league.id) {
+            let report = simulate(league.rules.model, &world.match_input(f.home, f.away, false), rng);
+            let Some(detail) = report.detail else { return stats };
+            stats.matches += 1;
+            stats.home_possession += detail.home_possession as u32;
+            for event in &detail.events {
+                match *event {
+                    Event::Shot { on_target, .. } => {
+                        stats.shots += 1;
+                        stats.on_target += on_target as u32;
+                    }
+                    Event::Goal { minute, .. } => {
+                        stats.goals += 1;
+                        stats.first_half_goals += (minute <= 45) as u32;
+                    }
+                    Event::Corner { .. } => stats.corners += 1,
+                    Event::Foul { .. } => stats.fouls += 1,
+                    Event::Yellow { .. } => stats.yellows += 1,
+                    Event::Red { .. } => stats.reds += 1,
+                    _ => {}
+                }
+            }
+        }
+        stats
+    }
+
+    fn add(&mut self, o: &EventStats) {
+        self.matches += o.matches;
+        self.shots += o.shots;
+        self.on_target += o.on_target;
+        self.corners += o.corners;
+        self.fouls += o.fouls;
+        self.yellows += o.yellows;
+        self.reds += o.reds;
+        self.home_possession += o.home_possession;
+        self.first_half_goals += o.first_half_goals;
+        self.goals += o.goals;
+    }
+
+    /// One line per match figures, or `None` when there were no events.
+    fn line(&self) -> Option<String> {
+        if self.matches == 0 {
+            return None;
+        }
+        let n = self.matches as f64;
+        Some(format!(
+            "    per match: {:.1} shots ({:.0}% on target), {:.2} goals per shot, {:.1} corners, {:.1} fouls, {:.2} yellow, {:.2} red, home possession {:.0}%, {:.1}% of goals in the first half",
+            self.shots as f64 / n,
+            100.0 * self.on_target as f64 / self.shots.max(1) as f64,
+            self.goals as f64 / self.shots.max(1) as f64,
+            self.corners as f64 / n,
+            self.fouls as f64 / n,
+            self.yellows as f64 / n,
+            self.reds as f64 / n,
+            self.home_possession as f64 / n,
+            100.0 * self.first_half_goals as f64 / self.goals.max(1) as f64,
+        ))
+    }
+}
+
 /// Adds up league seasons, for one league or for all of them.
 #[derive(Default)]
 struct Totals {
+    events: EventStats,
     seasons: u32,
     /// Clubs of every league season added, to show an average.
     club_count: usize,
@@ -71,7 +152,8 @@ struct Totals {
 }
 
 impl Totals {
-    fn add(&mut self, clubs: usize, s: &LeagueSeason) {
+    fn add(&mut self, clubs: usize, s: &LeagueSeason, events: &EventStats) {
+        self.events.add(events);
         self.seasons += 1;
         self.club_count += clubs;
         self.season.matches += s.matches;
@@ -139,18 +221,22 @@ fn measure(world: &World, league: &Competition) -> LeagueSeason {
 /// then each of the big five.
 fn run(world: &mut World, options: &Options) -> Vec<(String, Totals)> {
     let (mut all, mut big_five) = (Totals::default(), Totals::default());
-    let mut big: Vec<(String, Totals)> = BIG_LEAGUES.iter().map(|(name, country)| (format!("{name} ({country})"), Totals::default())).collect();
+    let mut big: Vec<(String, Totals)> = TOP_FIVE_LEAGUES.iter().map(|(name, country)| (format!("{name} ({country})"), Totals::default())).collect();
     for season in 0..options.seasons {
         let mut rng = Rng::new(options.seed + season);
         world.generate_fixtures(); // starts every league again, results cleared
+        for league in world.competitions.values_mut() {
+            league.rules.model = options.model.unwrap_or(league.rules.model);
+        }
         world.play_season_to_end(&mut rng);
         for league in world.competitions.values().filter(|c| c.is_league() && c.clubs.len() >= 8) {
             let result = measure(world, league);
-            all.add(league.clubs.len(), &result);
+            let events = EventStats::measure(world, league, &mut rng);
+            all.add(league.clubs.len(), &result, &events);
             let name = (league.name.as_str(), league.country.as_str());
-            if let Some(i) = BIG_LEAGUES.iter().position(|&l| l == name) {
-                big[i].1.add(league.clubs.len(), &result);
-                big_five.add(league.clubs.len(), &result);
+            if let Some(i) = TOP_FIVE_LEAGUES.iter().position(|&l| l == name) {
+                big[i].1.add(league.clubs.len(), &result, &events);
+                big_five.add(league.clubs.len(), &result, &events);
             }
         }
     }
@@ -162,7 +248,7 @@ fn run(world: &mut World, options: &Options) -> Vec<(String, Totals)> {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let options = Options::parse(&args).unwrap_or_else(|message| {
-        eprintln!("{message}\nUsage: simtool [--edition 15] [--seasons 20] [--seed 1] [--db history.db]");
+        eprintln!("{message}\nUsage: simtool [--edition 15] [--seasons 20] [--seed 1] [--model cheap|shot-based] [--db history.db]");
         std::process::exit(2);
     });
     let conn = Connection::open(&options.db).unwrap_or_else(|e| {
@@ -177,9 +263,12 @@ fn main() {
     let start = Instant::now();
     let totals = run(&mut world, &options);
     let elapsed = start.elapsed();
-    println!("Edition {}, {} seasons from seed {}.\n", options.edition, options.seasons, options.seed);
+    println!("Edition {}, {} seasons from seed {}, {} model.\n", options.edition, options.seasons, options.seed, options.model.map_or("each league's own".to_string(), |m| format!("{m:?}")));
     for (label, t) in &totals {
         println!("{}", t.line(label));
+        if let Some(events) = t.events.line() {
+            println!("{events}");
+        }
     }
     println!("\n{:.2} s per season ({} seasons in {:.1} s)", elapsed.as_secs_f64() / options.seasons.max(1) as f64, options.seasons, elapsed.as_secs_f64());
 }
@@ -195,7 +284,7 @@ mod tests {
     #[test]
     fn options_have_defaults_and_read_named_values() {
         let o = Options::parse(&[]).unwrap();
-        assert_eq!((o.edition, o.seasons, o.seed, o.db.as_str()), (15, 20, 1, "history.db"));
+        assert_eq!((o.edition, o.seasons, o.seed, o.db.as_str(), o.model), (15, 20, 1, "history.db", None));
         let o = Options::parse(&strings(&["--edition", "24", "--seasons", "5", "--seed", "9", "--db", "x.db"])).unwrap();
         assert_eq!((o.edition, o.seasons, o.seed, o.db.as_str()), (24, 5, 9, "x.db"));
     }
@@ -205,6 +294,7 @@ mod tests {
         assert!(Options::parse(&strings(&["--seasons"])).is_err());
         assert!(Options::parse(&strings(&["--seasons", "many"])).is_err());
         assert!(Options::parse(&strings(&["--colour", "red"])).is_err());
+        assert!(Options::parse(&strings(&["--model", "magic"])).is_err());
     }
 
     #[test]
@@ -212,7 +302,7 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../history.db");
         if !std::path::Path::new(path).exists() { return; } // needs `cargo run -p import` first
         let mut world = load_edition(&Connection::open(path).unwrap(), 15).unwrap();
-        let options = Options { db: path.into(), edition: 15, seasons: 1, seed: 3 };
+        let options = Options { db: path.into(), edition: 15, seasons: 1, seed: 3, model: None };
         let first = run(&mut world, &options);
         let second = run(&mut world, &options);
         let (all, again) = (&first[0].1, &second[0].1);

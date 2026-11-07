@@ -2,15 +2,17 @@
 //! `MatchReport`, and `simulate` picks one by `MatchModel`. A competition's `Rules` say which model its matches use.
 //!
 //! - `cheap`: team strength to a score (Poisson goals with a Dixon-Coles correction). No events.
+//! - `shot_based`: a timeline of shots, saves, goals, fouls, cards and corners, with possession. Events and detail.
 //!
 //! The report always has the score. A model that plays the match out also returns its events as `detail`; stats and
 //! match ratings are worked out from those events, so any model that emits the events they need works with them.
 //! Adding a model: a new file, a `MatchModel` variant and an arm in `simulate`; the compiler lists the rest.
 mod cheap;
+mod shot_based;
 
 pub use cheap::team_strength;
 
-use crate::model::PlayerId;
+use crate::model::{Line, PlayerId};
 use crate::outcome::{Outcome, Side};
 use crate::rng::Rng;
 
@@ -19,18 +21,53 @@ use crate::rng::Rng;
 pub enum MatchModel {
     /// Team strength to a score: fast, no events. For every competition that does not need detail.
     Cheap,
+    /// Shots, saves, goals, fouls, cards and corners over the 90 minutes: events and possession, slower.
+    ShotBased,
 }
 
 impl MatchModel {
     /// Every model, so a test can run them all.
-    pub const ALL: &'static [MatchModel] = &[MatchModel::Cheap];
+    pub const ALL: &'static [MatchModel] = &[MatchModel::Cheap, MatchModel::ShotBased];
+}
+
+/// What a model needs to know about one player in the lineup.
+#[derive(Clone, Copy, Debug)]
+pub struct MatchPlayer {
+    pub id: PlayerId,
+    /// The part of the pitch of the slot he plays (not of his own main position).
+    pub line: Line,
+    /// His rating in that slot, 0-99.
+    pub rating: u8,
+    /// How well he finishes, 0-99.
+    pub finishing: u8,
+    /// How well he sets up goals (passing and vision), 0-99.
+    pub creativity: u8,
 }
 
 /// What a model needs to know about one side.
 #[derive(Clone, Copy, Debug)]
 pub struct MatchTeam {
-    /// The rating (0-99) of the player in each lineup slot, in `Formation::slots` order; 0 for an empty slot.
-    pub ratings: [u8; 11],
+    /// The player in each lineup slot, in `Formation::slots` order (so the goalkeeper is first).
+    pub players: [MatchPlayer; 11],
+}
+
+impl MatchTeam {
+    /// The ratings (0-99) of the eleven, in slot order.
+    pub fn ratings(&self) -> [u8; 11] {
+        self.players.map(|p| p.rating)
+    }
+
+    /// A 4-4-2 of eleven equal players, for tests of a model.
+    #[cfg(test)]
+    pub(crate) fn flat(rating: u8) -> MatchTeam {
+        let line = |slot: usize| match slot {
+            0 => Line::Goalkeeper,
+            1..=4 => Line::Defence,
+            5..=8 => Line::Midfield,
+            _ => Line::Attack,
+        };
+        MatchTeam { players: std::array::from_fn(|i| MatchPlayer { id: i as PlayerId, line: line(i), rating, finishing: rating, creativity: rating }) }
+    }
 }
 
 /// Everything a model needs to play one match.
@@ -55,11 +92,24 @@ pub enum Event {
         /// `None` for a goal nobody set up.
         assister: Option<PlayerId>,
     },
+    /// A shot; one that scores is followed by its `Goal`, one on target that does not by a `Save`.
+    Shot { minute: u8, side: Side, shooter: PlayerId, on_target: bool },
+    /// The goalkeeper of `side` stops a shot on target.
+    Save { minute: u8, side: Side, keeper: PlayerId },
+    /// A corner won by `side`.
+    Corner { minute: u8, side: Side },
+    /// A foul by `player` of `side`.
+    Foul { minute: u8, side: Side, player: PlayerId },
+    Yellow { minute: u8, side: Side, player: PlayerId },
+    /// A red card, straight or for a second yellow.
+    Red { minute: u8, side: Side, player: PlayerId },
 }
 
 /// What a model that plays the match out returns on top of the score.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchDetail {
+    /// The home side's share of the ball, in percent (0-100).
+    pub home_possession: u8,
     /// In time order.
     pub events: Vec<Event>,
 }
@@ -77,6 +127,7 @@ pub struct MatchReport {
 pub fn simulate(model: MatchModel, input: &MatchInput, rng: &mut Rng) -> MatchReport {
     match model {
         MatchModel::Cheap => cheap::simulate(input, rng),
+        MatchModel::ShotBased => shot_based::simulate(input, rng),
     }
 }
 
@@ -85,7 +136,7 @@ mod tests {
     use super::*;
 
     fn input(home: u8, away: u8, must_have_winner: bool) -> MatchInput {
-        MatchInput { home: MatchTeam { ratings: [home; 11] }, away: MatchTeam { ratings: [away; 11] }, must_have_winner }
+        MatchInput { home: MatchTeam::flat(home), away: MatchTeam::flat(away), must_have_winner }
     }
 
     // Rules every model must keep; a new model is added to `MatchModel::ALL` and these run for it too.

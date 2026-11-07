@@ -1,7 +1,9 @@
 //! Playing fixtures: one match, one week, or everything up to a club's next match.
-use crate::model::{ClubId, World};
+use crate::attrs::Attr;
+use crate::lineup::rating_at;
+use crate::model::{ClubId, Player, Position, World};
 use crate::rng::Rng;
-use crate::sim::{simulate, MatchInput, MatchTeam};
+use crate::sim::{simulate, MatchInput, MatchPlayer, MatchTeam};
 
 impl World {
     /// Plays the fixture at `index` in `fixtures` with its competition's match model and stores the result. Cup ties
@@ -58,12 +60,32 @@ impl World {
     }
 
     /// What a match model needs to know about the two clubs: their lineups, each player rated in his slot.
-    fn match_input(&self, home: ClubId, away: ClubId, must_have_winner: bool) -> MatchInput {
-        MatchInput {
-            home: MatchTeam { ratings: self.lineup_ratings(home) },
-            away: MatchTeam { ratings: self.lineup_ratings(away) },
-            must_have_winner,
-        }
+    pub fn match_input(&self, home: ClubId, away: ClubId, must_have_winner: bool) -> MatchInput {
+        MatchInput { home: self.match_team(home), away: self.match_team(away), must_have_winner }
+    }
+
+    /// The club's lineup as the match models see it. An empty slot is a player with id 0 and rating 0.
+    fn match_team(&self, club: ClubId) -> MatchTeam {
+        let slots = self.clubs[&club].formation.slots();
+        let lineup = self.lineup_of(club);
+        let players = std::array::from_fn(|i| match lineup[i] {
+            Some(id) => match_player(&self.players[&id], slots[i]),
+            None => MatchPlayer { id: 0, line: slots[i].line(), rating: 0, finishing: 0, creativity: 0 },
+        });
+        MatchTeam { players }
+    }
+}
+
+/// One lineup player for a match model. An attribute the data lacks (FIFA 15) counts as his rating in the slot.
+fn match_player(player: &Player, slot: Position) -> MatchPlayer {
+    let rating = rating_at(player, slot);
+    let attr = |a: Attr| player.attrs[a].unwrap_or(rating);
+    MatchPlayer {
+        id: player.id,
+        line: slot.line(),
+        rating,
+        finishing: attr(Attr::Finishing),
+        creativity: ((attr(Attr::Vision) as u16 + attr(Attr::ShortPassing) as u16) / 2) as u8,
     }
 }
 

@@ -26,6 +26,7 @@ mod testing;
 pub use attrs::{Attr, Attrs, KEEPER, OUTFIELD};
 pub use competition::{
     draw_round, match_date, round_robin, standings, ClubMove, Competition, Entry, Format, Rules, Stage, TableRow,
+    TOP_FIVE_LEAGUES,
 };
 pub use history::{career, edition_label, player_name, search, season_label, season_name, Hit, Snapshot};
 pub use lineup::{

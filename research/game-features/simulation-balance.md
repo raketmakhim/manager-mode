@@ -101,3 +101,29 @@ A scan of rho (big five together, other constants as before): rho 0 gives 22.7% 
 Per league with FIFA 15 ratings (first / last place points per match against the real figure): Premier League 2.28 / 0.58 (real 2.41 / 0.59), Bundesliga 2.54 / 0.57 (2.38 / 0.65), La Liga 2.43 / 0.74 (2.37 / 0.67), Serie A 2.32 / 0.58 (2.36 / 0.56), Ligue 1 2.47 / 0.70 (2.35 / 0.66). Draws are 23.9% to 25.3% in each of the five (real 23.3% to 26.0%).
 
 Still off: goal rates are the same in every league (Bundesliga 3.02, La Liga 2.63 in reality), and single leagues follow their ratings (Bayern's lead over the Bundesliga in FIFA 15 gives a champion at 2.54).
+
+## The shot-based model (2026-11-07)
+
+`engine/src/sim/shot_based.rs` plays the top five leagues (`TOP_FIVE_LEAGUES`, set by `Rules::for_league`); every other competition keeps the cheap model. Constants were tuned in the simtool (`cargo run -p simtool --release -- --seasons 40`, 20 seasons for FC 24), first against the event rates, then against the tables. Goals come out of the shots, so the table check is the same as for the cheap model.
+
+| Big five together | Goals | Home % | Draw % | Away % | 1st | 2nd | 4th | Last |
+|---|---|---|---|---|---|---|---|---|
+| Real | 2.77 | 44.4 | 25.1 | 30.5 | 2.37 | 2.11 | 1.83 | 0.63 |
+| Shot-based, FIFA 15 ratings | 2.77 | 44.4 | 24.1 | 31.5 | 2.38 | 2.12 | 1.80 | 0.62 |
+| Shot-based, FC 24 ratings | 2.72 | 44.1 | 24.4 | 31.4 | 2.31 | 2.06 | 1.82 | 0.67 |
+
+| Per match, both teams | Real | Shot-based |
+|---|---|---|
+| Shots | 24.6 | 24.6 |
+| On target | 36% | 36% |
+| Goals per shot | 0.112 | 0.11 |
+| Corners | 9.9 | 9.8 |
+| Fouls | 25.3 | 25.3 |
+| Yellow cards | 4.10 | 4.07 |
+| Red cards | 0.20 | 0.20 |
+| Goals in the first half | 44.2% | 44.7% |
+
+What was needed beyond the plain shot rates:
+- **Draws.** Independent shots give about 22.7% draws (the same as independent Poisson goals). A side that leads keeps only half of its later shots (`LEADER_KEEPS_SHOOTING`), which brings draws to about 24%, 1 point under real. The cost is that goals and shots fall, so the base shot rate is higher to compensate, and the first-half share of the minutes is set a little under the real 44.2% because a lead is built in the first half.
+- **Red cards.** Second yellows alone made reds 0.48 a match; a player already booked is booked a quarter as often (`BOOKED_CAUTION`), which gives the real 0.20.
+- **Not modelled yet:** a sent-off player stays on the pitch, there are no substitutions, penalties or injuries (no source for their rates yet), no per-league goal rate, and possession (52% for the home side on average) has no real figure to check against.

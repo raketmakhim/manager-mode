@@ -66,10 +66,25 @@ pub struct Rules {
     pub model: MatchModel,
 }
 
+/// The five leagues played with the detailed match model, as (league name, country).
+pub const TOP_FIVE_LEAGUES: [(&str, &str); 5] = [
+    ("Premier League", "England"),
+    ("Bundesliga", "Germany"),
+    ("La Liga", "Spain"),
+    ("Serie A", "Italy"),
+    ("Ligue 1", "France"),
+];
+
 impl Rules {
     /// Everyone plays everyone home and away. The default for any league we have not researched.
     pub fn double_round_robin() -> Rules {
         Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED, model: MatchModel::Cheap }
+    }
+
+    /// The rules of a league by its name and country: a double round robin, with the shot-based model for the top five.
+    pub fn for_league(name: &str, country: &str) -> Rules {
+        let model = if TOP_FIVE_LEAGUES.contains(&(name, country)) { MatchModel::ShotBased } else { MatchModel::Cheap };
+        Rules { model, ..Rules::double_round_robin() }
     }
 }
 
