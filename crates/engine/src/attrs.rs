@@ -164,7 +164,6 @@ impl Attrs {
     }
 }
 
-
 impl Default for Attrs {
     fn default() -> Self { Attrs([None; COUNT]) } // arrays this long have no derived Default
 }

@@ -1,7 +1,7 @@
 //! The club's fixture list: every league match and cup tie with its date, in date order.
 use crate::{GREEN, RED};
 use eframe::egui::{self, Color32, RichText};
-use engine::{match_date, ClubId, Day, Side, World};
+use engine::{match_date, ClubId, Day, World, NO_RESULT};
 
 /// Shows the fixtures of `club_id`.
 pub fn ui(ui: &mut egui::Ui, world: &World, club_id: ClubId) {
@@ -9,7 +9,7 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club_id: ClubId) {
     let mut rows: Vec<Row> = world
         .fixtures
         .iter()
-        .filter(|f| f.home == club_id || f.away == club_id)
+        .filter(|f| f.involves(club_id))
         .map(|f| {
             let home = f.home == club_id;
             Row {
@@ -19,22 +19,21 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club_id: ClubId) {
                 round: f.round.to_string(),
                 venue: if home { "H" } else { "A" },
                 opponent: world.clubs[if home { &f.away } else { &f.home }].name.clone(),
-                result: f.result.map_or("-".to_string(), |o| o.to_string()),
-                colour: f.result.and_then(|o| o.winner()).map(|winner| if (winner == Side::Home) == home { GREEN } else { RED }),
+                result: f.result_text(),
+                colour: f.winner().map(|winner| if winner == club_id { GREEN } else { RED }),
             }
         })
         .collect();
     let mut knocked_out = vec![];
     for cup in world.competitions.values().filter(|c| c.is_cup() && c.clubs.contains(&club_id)) {
         let drawn = || world.fixtures.iter().filter(|f| f.competition == cup.id);
-        let mine = || drawn().filter(|f| f.home == club_id || f.away == club_id);
+        let mine = || drawn().filter(|f| f.involves(club_id));
         if !mine().any(|f| f.round == 1) {
             let (week, day) = drawn().map(|f| (f.week, f.day)).min().unwrap_or((1, Day::Wednesday));
-            rows.push(Row { week, day, competition: cup.name.clone(), round: "1".into(), venue: "", opponent: "bye: into round 2".into(), result: "-".into(), colour: None });
+            rows.push(Row { week, day, competition: cup.name.clone(), round: "1".into(), venue: "", opponent: "bye: into round 2".into(), result: NO_RESULT.into(), colour: None });
         }
         if let Some(last) = mine().max_by_key(|f| f.round) {
-            let loser = if last.result.and_then(|o| o.winner()) == Some(Side::Home) { last.away } else { last.home };
-            if last.result.is_some() && loser == club_id {
+            if last.loser() == Some(club_id) {
                 knocked_out.push(format!("Knocked out of the {} in round {}.", cup.name, last.round));
             }
         }

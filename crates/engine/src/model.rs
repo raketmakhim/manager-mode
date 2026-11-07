@@ -3,7 +3,7 @@
 //! a `Player` here is the player right now and the simulation changes it.
 use crate::attrs::Attrs;
 use crate::competition::Competition;
-use crate::outcome::Outcome;
+use crate::outcome::{Outcome, Side};
 use std::collections::BTreeMap;
 
 /// Same number as `player_id` in history.db, so we can look up a player's real future.
@@ -132,6 +132,9 @@ impl Day {
     }
 }
 
+/// What is shown for a match that has no result yet.
+pub const NO_RESULT: &str = "-";
+
 pub struct Fixture {
     pub competition: CompetitionId,
     /// Matchday within its competition: 1 = the first round of that league or cup.
@@ -145,6 +148,34 @@ pub struct Fixture {
     pub away: ClubId,
     /// `None` until played.
     pub result: Option<Outcome>,
+}
+
+impl Fixture {
+    /// True if the club plays in this match, at home or away.
+    pub fn involves(&self, club: ClubId) -> bool {
+        self.home == club || self.away == club
+    }
+
+    /// The club that won, or `None` for a draw or a match not played yet.
+    pub fn winner(&self) -> Option<ClubId> {
+        match self.result?.winner()? {
+            Side::Home => Some(self.home),
+            Side::Away => Some(self.away),
+        }
+    }
+
+    /// The club that lost, or `None` for a draw or a match not played yet.
+    pub fn loser(&self) -> Option<ClubId> {
+        match self.result?.winner()? {
+            Side::Home => Some(self.away),
+            Side::Away => Some(self.home),
+        }
+    }
+
+    /// "2-1", "2-1 aet", or `NO_RESULT` before it is played.
+    pub fn result_text(&self) -> String {
+        self.result.map_or(NO_RESULT.to_string(), |o| o.to_string())
+    }
 }
 
 /// The whole game in one place. Ordered maps (not HashMap) so that looping over them gives the
@@ -185,5 +216,27 @@ mod tests {
             assert_eq!(Position::parse(position.code()), Some(position));
         }
         assert_eq!(Position::parse("XX"), None);
+    }
+
+    fn fixture(result: Option<Outcome>) -> Fixture {
+        Fixture { competition: 1, round: 1, week: 1, day: Day::Saturday, home: 10, away: 20, result }
+    }
+
+    #[test]
+    fn a_fixture_knows_its_clubs_winner_loser_and_result_text() {
+        let won_by_home = fixture(Some(Outcome::full_time(2, 1)));
+        assert!(won_by_home.involves(10) && won_by_home.involves(20) && !won_by_home.involves(30));
+        assert_eq!((won_by_home.winner(), won_by_home.loser()), (Some(10), Some(20)));
+        assert_eq!(won_by_home.result_text(), "2-1");
+
+        let draw = fixture(Some(Outcome::full_time(1, 1)));
+        assert_eq!((draw.winner(), draw.loser()), (None, None));
+
+        let unplayed = fixture(None);
+        assert_eq!((unplayed.winner(), unplayed.loser()), (None, None));
+        assert_eq!(unplayed.result_text(), "-");
+
+        let shootout = fixture(Some(Outcome { full_time: (1, 1), extra_time: Some((0, 0)), shootout: Some((3, 4)) }));
+        assert_eq!(shootout.winner(), Some(20), "a shootout decides it");
     }
 }

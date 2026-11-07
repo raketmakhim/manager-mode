@@ -1,11 +1,11 @@
-//! Manager Mode window. Tabs: Career (new career, your club's fixtures), League browser (any league's fixtures) and Player scout (real player history).
+//! Manager Mode window. Tabs: Career (new career, your club's fixtures, squad and competitions) and Player scout (real player history).
 //! Usage: gui [history.db]
 mod career;
 mod competitions;
 mod fixtures;
+mod leagues;
 mod scout;
 mod squad;
-mod season;
 
 use eframe::egui::{self, Color32};
 use engine::Connection;
@@ -16,7 +16,6 @@ pub const RED: Color32 = Color32::from_rgb(230, 80, 80);
 #[derive(PartialEq)]
 enum Tab {
     Career,
-    Season,
     Scout,
 }
 
@@ -24,7 +23,6 @@ struct App {
     conn: Connection,
     tab: Tab,
     career: career::Career,
-    season: season::Season,
     scout: scout::Scout,
 }
 
@@ -33,13 +31,11 @@ impl eframe::App for App {
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tab, Tab::Career, "Career");
-                ui.selectable_value(&mut self.tab, Tab::Season, "League browser");
                 ui.selectable_value(&mut self.tab, Tab::Scout, "Player scout");
             });
         });
         match self.tab {
             Tab::Career => self.career.ui(ui, &self.conn),
-            Tab::Season => self.season.ui(ui, &self.conn),
             Tab::Scout => self.scout.ui(ui, &self.conn),
         }
     }
@@ -52,7 +48,7 @@ fn main() -> eframe::Result {
         std::process::exit(1);
     }
     let conn = Connection::open(&path).expect("open history.db");
-    let app = App { career: career::Career::new(&conn), season: season::Season::new(&conn), scout: scout::Scout::default(), tab: Tab::Career, conn };
+    let app = App { career: career::Career::new(&conn), scout: scout::Scout::default(), tab: Tab::Career, conn };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1250.0, 850.0]),
         ..Default::default()

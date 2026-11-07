@@ -28,13 +28,6 @@ impl World {
         !self.fixtures.is_empty() && self.fixtures.iter().all(|f| f.result.is_some())
     }
 
-    /// Plays every match that is left, week by week, so cup rounds still get drawn in order.
-    pub fn play_season_to_end(&mut self, rng: &mut Rng) {
-        while let Some(week) = self.fixtures.iter().filter(|f| f.result.is_none()).map(|f| f.week).min() {
-            self.play_week(week, rng);
-        }
-    }
-
     /// Moves clubs between divisions: in each country, neighbouring levels (1 and 2, 2 and 3...) swap their
     /// bottom and top clubs. Returns every move.
     fn promote_and_relegate(&mut self) -> Vec<ClubMove> {

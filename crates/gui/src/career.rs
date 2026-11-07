@@ -1,5 +1,5 @@
 //! Career tab: start a new career (pick a year, a league and a club), then see that club's fixtures and dates.
-use crate::season::{league_label, sorted_leagues};
+use crate::leagues::{league_label, sorted_leagues};
 use crate::squad::{self, Checkpoint};
 use crate::{competitions, fixtures, RED};
 use eframe::egui;
@@ -109,7 +109,6 @@ impl Career {
         self.last_played = Some(format!("{} clubs changed division. {text} {ratings}", moves.len()));
         self.competition = None;
     }
-
 
     pub fn ui(&mut self, ui: &mut egui::Ui, conn: &Connection) {
         if self.world.is_none() {
@@ -246,7 +245,7 @@ mod tests {
         let world = c.world.as_ref().unwrap();
         let club = c.club.unwrap();
         let league = world.clubs[&club].league;
-        let mine = |id: CompetitionId| world.fixtures.iter().filter(|f| f.competition == id && (f.home == club || f.away == club)).count();
+        let mine = |id: CompetitionId| world.fixtures.iter().filter(|f| f.competition == id && f.involves(club)).count();
         let n = world.competitions[&league].clubs.len();
         assert_eq!(mine(league), 2 * (n - 1));
         assert!(world.calendar_problems().is_empty());

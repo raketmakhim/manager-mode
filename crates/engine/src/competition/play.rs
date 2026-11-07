@@ -1,5 +1,5 @@
 //! Playing fixtures: one match, one week, or everything up to a club's next match.
-use crate::model::{ClubId, Fixture, World};
+use crate::model::{ClubId, World};
 use crate::rng::Rng;
 use crate::sim::{simulate_match, team_strength};
 
@@ -23,22 +23,28 @@ impl World {
         self.advance_cups(rng);
     }
 
+    /// Plays every match that is left, week by week, so cup rounds still get drawn in order.
+    pub fn play_season_to_end(&mut self, rng: &mut Rng) {
+        while let Some(week) = self.next_unplayed_week() {
+            self.play_week(week, rng);
+        }
+    }
+
     /// Plays on until the club's next unplayed match has been played: the earlier weeks for everyone, then that
     /// match and the other clubs' matches of its week. If the club has a second match that week it stays unplayed
     /// for the next call. Returns the played fixture's index, or `None` if the club has nothing left to play.
     pub fn play_next_match(&mut self, club: ClubId, rng: &mut Rng) -> Option<usize> {
-        let involves = |f: &Fixture| f.home == club || f.away == club;
         let next = (0..self.fixtures.len())
-            .filter(|&i| self.fixtures[i].result.is_none() && involves(&self.fixtures[i]))
+            .filter(|&i| self.fixtures[i].result.is_none() && self.fixtures[i].involves(club))
             .min_by_key(|&i| (self.fixtures[i].week, self.fixtures[i].day))?;
         let week = self.fixtures[next].week;
         // Weeks one at a time, so a cup round drawn after week 3 is placed after week 3 and still gets played in order.
-        while let Some(w) = self.fixtures.iter().filter(|f| f.result.is_none()).map(|f| f.week).min().filter(|&w| w < week) {
+        while let Some(w) = self.next_unplayed_week().filter(|&w| w < week) {
             self.play_week(w, rng);
         }
         for i in 0..self.fixtures.len() {
             let f = &self.fixtures[i];
-            if f.week == week && f.result.is_none() && (i == next || !involves(f)) {
+            if f.week == week && f.result.is_none() && (i == next || !f.involves(club)) {
                 self.play_fixture(i, rng);
             }
         }
@@ -110,11 +116,10 @@ mod tests {
         while w.play_next_match(1, &mut rng).is_some() {
             played += 1;
         }
-        let mine = w.fixtures.iter().filter(|f| f.home == 1 || f.away == 1).count();
+        let mine = w.fixtures.iter().filter(|f| f.involves(1)).count();
         assert_eq!(played, mine, "one call per match of the club");
-        assert!(w.fixtures.iter().filter(|f| f.home == 1 || f.away == 1).all(|f| f.result.is_some()));
+        assert!(w.fixtures.iter().filter(|f| f.involves(1)).all(|f| f.result.is_some()));
     }
-
 
     #[test]
     fn a_finished_league_table_adds_up() {
@@ -137,9 +142,7 @@ mod tests {
         let cup = w.competitions.values().find(|c| c.is_cup()).unwrap().id;
         let mut rng = Rng::new(2);
         while w.play_next_match(1, &mut rng).is_some() {}
-        while let Some(week) = w.fixtures.iter().filter(|f| f.result.is_none()).map(|f| f.week).min() {
-            w.play_week(week, &mut rng);
-        }
+        w.play_season_to_end(&mut rng);
         assert_eq!(w.fixtures.iter().filter(|f| f.competition == cup).count(), 7, "8 clubs: 7 cup matches in 3 rounds");
         assert!(w.fixtures.iter().all(|f| f.result.is_some()));
         assert!(w.calendar_problems().is_empty());

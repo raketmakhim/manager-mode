@@ -1,5 +1,5 @@
 //! The Competitions view: pick a league or cup and see its table or its rounds.
-use crate::season::league_label;
+use crate::leagues::league_label;
 use eframe::egui::{self, RichText};
 use engine::{match_date, ClubId, Competition, CompetitionId, Fixture, World};
 
@@ -67,7 +67,7 @@ fn cup_ui(ui: &mut egui::Ui, world: &World, cup: &Competition, my_club: ClubId) 
             egui::Grid::new(("cup_round", round)).striped(true).min_col_width(160.0).show(ui, |ui| {
                 for f in ties {
                     ui.label(club_text(world, f.home, my_club));
-                    ui.label(f.result.map_or("-".to_string(), |o| o.to_string()));
+                    ui.label(f.result_text());
                     ui.label(club_text(world, f.away, my_club));
                     ui.end_row();
                 }

@@ -47,7 +47,12 @@ impl World {
     /// How many matches the club plays in that week (1 = first week of the season).
     // shortcut: scans every fixture on each call; index by (club, week) if scheduling gets slow
     pub fn matches_in_week(&self, club: ClubId, week: u8) -> usize {
-        self.fixtures.iter().filter(|f| f.week == week && (f.home == club || f.away == club)).count()
+        self.fixtures.iter().filter(|f| f.week == week && f.involves(club)).count()
+    }
+
+    /// The earliest week with a match still to play, or `None` when everything is played.
+    pub fn next_unplayed_week(&self) -> Option<u8> {
+        self.fixtures.iter().filter(|f| f.result.is_none()).map(|f| f.week).min()
     }
 
     /// First week from `from_week` on where every one of these clubs can still play one more match

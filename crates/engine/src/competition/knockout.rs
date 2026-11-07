@@ -1,7 +1,6 @@
 //! Single-leg knockout cups: draw a round, play it, draw the next from the winners.
 use super::{Competition, Entry, Format, Rules, Stage};
 use crate::model::{ClubId, CompetitionId, Day, Fixture, World};
-use crate::outcome::Side;
 use crate::rng::Rng;
 use std::collections::{BTreeMap, HashSet};
 
@@ -36,10 +35,8 @@ pub fn draw_round(clubs: &[ClubId], rng: &mut Rng) -> Vec<(ClubId, ClubId)> {
 fn clubs_left(clubs: &[ClubId], played: &[&Fixture]) -> Vec<ClubId> {
     let losers: HashSet<ClubId> = played
         .iter()
-        .filter_map(|f| match f.result?.winner().expect("a cup match must be decided") {
-            Side::Home => Some(f.away),
-            Side::Away => Some(f.home),
-        })
+        .filter(|f| f.result.is_some())
+        .map(|f| f.loser().unwrap_or_else(|| panic!("cup tie {} v {} (round {}) ended level: the simulation must decide cup ties", f.home, f.away, f.round)))
         .collect();
     clubs.iter().copied().filter(|c| !losers.contains(c)).collect()
 }
@@ -192,5 +189,15 @@ mod tests {
         assert_eq!((cups[0].id, cups[0].name.as_str(), cups[0].clubs.len()), (10, "England Cup", 4));
         w.add_default_cups();
         assert_eq!(w.competitions.values().filter(|c| c.is_cup()).count(), 1, "a second call must add nothing");
+    }
+
+    #[test]
+    #[should_panic(expected = "ended level")]
+    fn a_level_cup_tie_stops_the_simulation_with_a_clear_message() {
+        let mut w = world_with_cup(4);
+        let mut rng = Rng::new(1);
+        w.advance_cups(&mut rng);
+        w.fixtures.iter_mut().for_each(|f| f.result = Some(Outcome::full_time(1, 1)));
+        w.advance_cups(&mut rng);
     }
 }

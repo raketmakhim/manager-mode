@@ -62,29 +62,28 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
 
     let sql = format!(
         "SELECT r.player_id AS id, p.long_name AS name, p.dob AS dob, r.player_positions AS positions,
-                r.overall AS overall, r.potential AS potential, r.club_team_id AS club,
-                r.wage_eur AS wage, r.value_eur AS value, r.club_contract_valid_until_year AS contract_until,
-                {}
+                r.club_team_id AS club, {}
          FROM ratings r JOIN players p USING (player_id)
          WHERE r.fifa_version = ?1
          ORDER BY r.overall DESC, r.player_id",
-        Attr::select_list()
+        Ratings::select_list()
     );
     let mut st = conn.prepare(&sql)?;
     let players = st.query_map([version], |r| {
         let positions: Option<String> = r.get("positions")?;
+        let ratings = Ratings::from_row(r)?;
         Ok(Player {
             id: r.get("id")?,
             name: r.get("name")?,
             birth_date: r.get("dob")?,
             positions: positions.unwrap_or_default().split(',').filter_map(|p| Position::parse(p.trim())).collect(),
-            attrs: Attrs::from_row(r)?,
-            overall: r.get::<_, Option<u8>>("overall")?.unwrap_or(0),
-            potential: r.get::<_, Option<u8>>("potential")?.unwrap_or(0),
+            attrs: ratings.attrs,
+            overall: ratings.overall,
+            potential: ratings.potential,
             club: r.get("club")?,
-            wage: r.get::<_, Option<u32>>("wage")?.unwrap_or(0),
-            contract_until: r.get("contract_until")?,
-            value: r.get::<_, Option<u32>>("value")?.unwrap_or(0),
+            wage: ratings.wage,
+            contract_until: ratings.contract_until,
+            value: ratings.value,
             form: NEUTRAL_FORM,
             fitness: FULL_FITNESS,
         })
@@ -99,7 +98,7 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
     Ok(world)
 }
 
-/// One player's real ratings in one edition.
+/// One player's real ratings in one edition: the part of a `ratings` row that changes from year to year.
 struct Ratings {
     overall: u8,
     potential: u8,
@@ -109,28 +108,34 @@ struct Ratings {
     attrs: Attrs,
 }
 
+impl Ratings {
+    /// The `ratings` columns this struct reads, for a query over `ratings AS r`.
+    fn select_list() -> String {
+        format!(
+            "r.overall AS overall, r.potential AS potential, r.wage_eur AS wage, r.value_eur AS value,
+             r.club_contract_valid_until_year AS contract_until, {}",
+            Attr::select_list()
+        )
+    }
+
+    /// Reads one row of a query that selected `Ratings::select_list()`. Missing numbers become 0.
+    fn from_row(r: &rusqlite::Row) -> Result<Ratings> {
+        Ok(Ratings {
+            overall: r.get::<_, Option<u8>>("overall")?.unwrap_or(0),
+            potential: r.get::<_, Option<u8>>("potential")?.unwrap_or(0),
+            wage: r.get::<_, Option<u32>>("wage")?.unwrap_or(0),
+            value: r.get::<_, Option<u32>>("value")?.unwrap_or(0),
+            contract_until: r.get("contract_until")?,
+            attrs: Attrs::from_row(r)?,
+        })
+    }
+}
+
 /// Every player's real ratings in one edition, by player id.
 fn read_ratings(conn: &Connection, version: i64) -> Result<HashMap<PlayerId, Ratings>> {
-    let sql = format!(
-        "SELECT r.player_id AS id, r.overall AS overall, r.potential AS potential, r.wage_eur AS wage,
-                r.value_eur AS value, r.club_contract_valid_until_year AS contract_until, {}
-         FROM ratings r WHERE r.fifa_version = ?1",
-        Attr::select_list()
-    );
+    let sql = format!("SELECT r.player_id AS id, {} FROM ratings r WHERE r.fifa_version = ?1", Ratings::select_list());
     let mut st = conn.prepare(&sql)?;
-    let rows = st.query_map([version], |r| {
-        Ok((
-            r.get::<_, PlayerId>("id")?,
-            Ratings {
-                overall: r.get::<_, Option<u8>>("overall")?.unwrap_or(0),
-                potential: r.get::<_, Option<u8>>("potential")?.unwrap_or(0),
-                wage: r.get::<_, Option<u32>>("wage")?.unwrap_or(0),
-                value: r.get::<_, Option<u32>>("value")?.unwrap_or(0),
-                contract_until: r.get("contract_until")?,
-                attrs: Attrs::from_row(r)?,
-            },
-        ))
-    })?;
+    let rows = st.query_map([version], |r| Ok((r.get::<_, PlayerId>("id")?, Ratings::from_row(r)?)))?;
     rows.collect()
 }
 
@@ -157,7 +162,6 @@ pub fn advance_ratings(conn: &Connection, world: &mut World) -> Result<bool> {
     world.edition = next;
     Ok(true)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -243,5 +247,26 @@ mod tests {
         let mut w = World::new(24, 2023);
         assert!(!advance_ratings(&conn, &mut w).unwrap());
         assert_eq!(w.edition, 24);
+    }
+
+    /// Checks `Ratings::select_list` and `Ratings::from_row` agree on the column names, without needing history.db.
+    #[test]
+    fn ratings_read_back_what_the_select_list_asks_for() {
+        let conn = Connection::open_in_memory().unwrap();
+        let attr_columns: Vec<String> = Attr::ALL.iter().map(|a| format!("{} INTEGER", a.column())).collect();
+        conn.execute_batch(&format!(
+            "CREATE TABLE ratings (overall INTEGER, potential INTEGER, wage_eur INTEGER, value_eur INTEGER,
+                                   club_contract_valid_until_year INTEGER, {});
+             INSERT INTO ratings (overall, potential, wage_eur, value_eur, club_contract_valid_until_year, {})
+                 VALUES (81, 85, NULL, 9000000, 2026, {});",
+            attr_columns.join(", "),
+            Attr::ALL.iter().map(|a| a.column()).collect::<Vec<_>>().join(", "),
+            Attr::ALL.iter().map(|_| "70").collect::<Vec<_>>().join(", "),
+        ))
+        .unwrap();
+        let sql = format!("SELECT {} FROM ratings r", Ratings::select_list());
+        let r = conn.query_row(&sql, [], Ratings::from_row).unwrap();
+        assert_eq!((r.overall, r.potential, r.wage, r.value, r.contract_until), (81, 85, 0, 9_000_000, Some(2026)));
+        assert_eq!(r.attrs[Attr::Finishing], Some(70));
     }
 }

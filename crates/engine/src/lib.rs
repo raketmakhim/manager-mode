@@ -20,10 +20,12 @@ mod sim;
 mod source;
 
 pub use attrs::{Attr, Attrs, KEEPER, OUTFIELD};
-pub use competition::{draw_round, match_date, round_robin, standings, ClubMove, Competition, Entry, Format, Rules, Stage, TableRow};
+pub use competition::{
+    draw_round, match_date, round_robin, standings, ClubMove, Competition, Entry, Format, Rules, Stage, TableRow,
+};
 pub use history::{career, edition_label, player_name, search, season_label, season_name, Hit, Snapshot};
 pub use model::{
-    Club, ClubId, CompetitionId, Day, Fixture, Player, PlayerId, Position, World, FULL_FITNESS, MAX_MATCHES_PER_WEEK,
+    Club, ClubId, CompetitionId, Day, Fixture, Player, PlayerId, Position, World, FULL_FITNESS, MAX_MATCHES_PER_WEEK, NO_RESULT,
     NEUTRAL_FORM,
 };
 pub use outcome::{Outcome, Side};
