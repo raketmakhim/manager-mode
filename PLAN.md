@@ -13,6 +13,10 @@ A playable single-player manager mode: one full season loop (squad -> fixtures -
 | Match presentation | Simulation only: you never play a match. Text commentary + stats, no 2D pitch |
 | Data | Historical yearly datasets (one per FIFA edition) in a read-only SQLite file, `history.db`, built by `crates/import`; start a career in any covered year. Today: FIFA 15 to FC 24 (Kaggle); earlier editions need a scrape. `engine::load_edition` turns an edition into an in-memory `World`; it becomes a `DataSource` trait only if a second source appears. The data is not committed. |
 | Competitions | A competition is a list of **stages** (round-robin, knockout, league phase...), not a type per kind. Rules are data and depend on the season (formats change between 2014 and 2023). Pairing, calendar placement, standings and qualification stay separate and reusable. Design in `research/engineering/competition-design.md` |
+| Match detail | Two levels, set per competition in its rules data. **Full** (events, cards, subs, ratings): the top flights of England, Spain, Germany, Italy and France, the Champions League, and the user's competitions. **Cheap** (score, scorers, assisters; clean sheets from the score): everything else, built on the same team-strength function and checked against the full simulation in `simtool`. Estimated saving about 72 to 79% of match work. Stats are totals per (season, competition, player), rebuilt from match reports. Details in `research/engineering/competition-design.md` |
+| Default competitions | A league or country we have not researched gets defaults, set in one place: a plain double round-robin, and a single-leg "<Country> Cup" knockout (random draw, lower division hosts, extra time then penalties, byes for the best clubs, no cup under 4 clubs). A researched competition replaces the default by registering its own rules for that season. Details in `research/engineering/competition-design.md` |
+| European places | A country's Champions League, Europa League and Conference League places are computed from its position in UEFA's country ranking that season (rank bands), plus the title-holder extra place and bans (Russia 2022/23 and 2023/24). We store each season's ranking order. Which club gets each place is a small table: finishing position or cup winner, to entry stage. See `research/game-features/european-places-by-season.md` |
+| Rescheduling | A moved match is placed with `first_free_week` as soon as possible after its original week. European dates are fixed first and domestic rounds fit around them. League calendars will need gaps (international and winter breaks); today round N is always week N. See `research/game-features/fixture-rescheduling.md` |
 | Calendar | Every fixture has a `competition` and a `week` (a 7-day block). A club plays at most 3 matches in any week (`MAX_MATCHES_PER_WEEK`). Leagues are scheduled up front, one round a week; cups will draw each round after the last is played and place it with `first_free_week`. `calendar_problems()` must always be empty |
 | Player growth | Follow real ratings from the dataset while history matches; once the world diverges, simulated growth nudged toward the real curve; fully simulated after the last data year |
 | Saves | JSON via `serde`, one file per save |
@@ -67,13 +71,14 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - **Done when**: 5 seasons run without broken state; reload restores the game
 
 ### M6 - Polish (optional)
-- Cups, youth academy, training, injuries depth, graphical UI (`egui`/Bevy), 2D match view
+- Domestic cups (once stages exist in M3; formats in `research/game-features/domestic-cup-formats.md`), European competitions and qualification, match rescheduling, calendar gaps, youth academy, training, injuries depth, graphical UI (`egui`/Bevy), 2D match view
 
 ## Risks
 
 - **Balance**: sim and economy tuning takes the most iteration. Mitigation: seeded sim plus a script that runs bulk simulations and prints stats.
 - **Scope creep**: FIFA career mode is huge. Mitigation: ship M1-M5 before adding anything from M6.
 - **AI transfers**: easy to make the market unrealistic. Start with simple rules (value +/- random margin).
+- **Competition rules vary by season and country**: the research covers the English, German, Italian and Spanish cups and Europe's top-15 countries for 2014/15 to 2023/24. The other leagues in the data (up to about 56) will use the default league and cup until researched.
 
 ## Next step
 
