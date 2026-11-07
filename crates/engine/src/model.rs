@@ -3,6 +3,7 @@
 //! a `Player` here is the player right now and the simulation changes it.
 use crate::attrs::Attrs;
 use crate::competition::Competition;
+use crate::lineup::{Formation, Selection};
 use crate::outcome::{Outcome, Side};
 use std::collections::BTreeMap;
 
@@ -19,11 +20,20 @@ pub const FULL_FITNESS: u8 = 100;
 /// The most matches a club may play in one week (a 7-day block of the season).
 pub const MAX_MATCHES_PER_WEEK: usize = 3;
 
-/// Defines `Position` plus its short code and `parse` in one place, so the three cannot drift apart.
-/// Each line is: variant name, code as written in the data. Grouped goalkeeper, defence, midfield, attack; inside
-/// each group left to right (centre positions deepest first).
+/// Which part of the pitch a position is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Line {
+    Goalkeeper,
+    Defence,
+    Midfield,
+    Attack,
+}
+
+/// Defines `Position` plus its short code, its line and `parse` in one place, so they cannot drift apart.
+/// Each line is: variant name, code as written in the data, line. Grouped goalkeeper, defence, midfield, attack;
+/// inside each group left to right (centre positions deepest first).
 macro_rules! positions {
-    ($($name:ident $code:literal),* $(,)?) => {
+    ($($name:ident $code:literal $line:ident),* $(,)?) => {
         /// Where a player can play, e.g. `Position::St`.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum Position { $($name),* }
@@ -33,6 +43,8 @@ macro_rules! positions {
             pub const ALL: &'static [Position] = &[$(Position::$name),*];
             /// Short code, e.g. "ST".
             pub fn code(self) -> &'static str { match self { $(Position::$name => $code),* } }
+            /// The part of the pitch he plays on.
+            pub fn line(self) -> Line { match self { $(Position::$name => Line::$line),* } }
             /// "ST" -> `Some(Position::St)`; anything else is `None`.
             pub fn parse(s: &str) -> Option<Position> { match s { $($code => Some(Position::$name),)* _ => None } }
         }
@@ -40,24 +52,24 @@ macro_rules! positions {
 }
 
 positions! {
-    Gk  "GK",
+    Gk  "GK"  Goalkeeper,
 
-    Lwb "LWB",
-    Lb  "LB",
-    Cb  "CB",
-    Rb  "RB",
-    Rwb "RWB",
+    Lwb "LWB" Defence,
+    Lb  "LB"  Defence,
+    Cb  "CB"  Defence,
+    Rb  "RB"  Defence,
+    Rwb "RWB" Defence,
 
-    Lm  "LM",
-    Cdm "CDM",
-    Cm  "CM",
-    Cam "CAM",
-    Rm  "RM",
+    Lm  "LM"  Midfield,
+    Cdm "CDM" Midfield,
+    Cm  "CM"  Midfield,
+    Cam "CAM" Midfield,
+    Rm  "RM"  Midfield,
 
-    Lw  "LW",
-    Cf  "CF",
-    St  "ST",
-    Rw  "RW",
+    Lw  "LW"  Attack,
+    Cf  "CF"  Attack,
+    St  "ST"  Attack,
+    Rw  "RW"  Attack,
 }
 
 pub struct Player {
@@ -96,8 +108,11 @@ pub struct Club {
     pub squad: Vec<PlayerId>,
     /// Transfer budget in euros; `None` when the data does not have it (all of FC 24).
     pub budget: Option<i64>,
-    /// The starting eleven. Empty until lineup selection exists.
-    pub lineup: Vec<PlayerId>,
+    /// How the club lines up.
+    pub formation: Formation,
+    /// The starting eleven and the bench the user has set. Empty means nothing was set, and `World::selection_of`
+    /// picks one. Read it through `selection_of`, not from here.
+    pub selection: Selection,
 }
 
 /// The day of the week a match is played. A season week starts on the Saturday, so the order here is the order

@@ -78,32 +78,16 @@ impl World {
 mod tests {
     use super::*;
     use crate::competition::{Competition, Rules};
-    use crate::model::{Club, Player};
+    use crate::testing::add_club_with_eleven;
 
     /// Two divisions of `size` clubs in one country: league 1 holds clubs 1..=size, league 2 the next `size`.
-    /// A club's only player is rated lower the higher its id, so the better divisions hold the lower ids.
+    /// A club is rated lower the higher its id, so the better divisions hold the lower ids.
     fn two_divisions(size: u32) -> World {
         let mut w = World::new(0, 2014);
         for (id, first) in [(1, 1), (2, size + 1)] {
             let clubs: Vec<ClubId> = (first..first + size).collect();
             for &c in &clubs {
-                let player = Player {
-                    id: c,
-                    name: String::new(),
-                    birth_date: String::new(),
-                    positions: vec![],
-                    attrs: Default::default(),
-                    overall: 99 - c as u8,
-                    potential: 99,
-                    club: Some(c),
-                    wage: 0,
-                    contract_until: None,
-                    value: 0,
-                    form: 50,
-                    fitness: 100,
-                };
-                w.players.insert(c, player);
-                w.clubs.insert(c, Club { id: c, name: format!("C{c}"), league: id, squad: vec![c], budget: None, lineup: vec![] });
+                add_club_with_eleven(&mut w, c, id, 99 - c as u8);
             }
             let rules = Rules::double_round_robin();
             w.competitions.insert(id, Competition { id, name: format!("D{id}"), country: "X".into(), rules, level: Some(id as u8), clubs });

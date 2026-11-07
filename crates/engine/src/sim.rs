@@ -12,10 +12,9 @@ const GOAL_RATE_PER_POINT: f64 = 0.06;
 /// Chance a penalty is scored.
 const PENALTY_SCORED: f64 = 0.75;
 
-/// A team's strength: the mean overall (0-99) of its best eleven players.
-/// Fewer than eleven players: the mean of those it has; none: 0.
-// shortcut: ignores positions and lineups (a squad of eleven strikers counts as well as a balanced one);
-// upgrade with the lineup picker.
+/// A team's strength: the mean of the best eleven ratings (0-99) given. Give it the lineup's ratings, each player
+/// rated in his slot (`World::lineup_ratings`), and an empty slot as 0. Fewer than eleven ratings: the mean of those
+/// given; none: 0.
 pub fn team_strength(overalls: &[u8]) -> f64 {
     let mut best = overalls.to_vec();
     best.sort_unstable_by(|a, b| b.cmp(a));

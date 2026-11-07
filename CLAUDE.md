@@ -19,7 +19,7 @@ Easy to read, no repeated code, nothing clever.
 - **Pure functions at the core.** Pairing, draws, standings and match simulation take plain inputs (clubs, results, a seeded RNG) and return plain outputs. They do not touch `World`; a thin layer applies the results to it.
 - **Differences are data, not code.** No `if country == ...`. A country or season differs by its `Rules` value.
 - **Enums and `match`, not trait objects or deep generics.** The compiler then lists every place to update. Each format's logic lives in its own file; the `match` only dispatches.
-- **Small public surface.** `lib.rs` re-exports only what other crates need. New features are their own modules working on `&World`, not new methods piled onto `World`.
+- **Small public surface.** `lib.rs` re-exports only what other crates need. A feature lives in its own module and adds its `impl World` methods there, not in `model.rs`, which stays plain data; keep those methods few and read-mostly.
 - **Short functions named for their job.** Comments explain why, not what. Every public item has a one-line doc with its unit (euros per week, years, 0 to 99).
 - **One pattern per recurring job.** Randomness is always an explicit seeded RNG passed in. Database columns are read by name. Errors use one style.
 - **Tests state rules, not output.** Prefer properties ("no club plays twice in a round", `calendar_problems()` is empty) that hold for every format. Exact numbers only as a few anchors (64 clubs give 63 matches).

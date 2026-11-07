@@ -5,7 +5,9 @@ use crate::sim::{simulate_match, team_strength};
 
 impl World {
     /// Plays the fixture at `index` in `fixtures` and stores its result. Cup ties always get a winner.
-    // shortcut: recomputes both squads' strength on every match; cache per club if a season sim gets slow.
+    // shortcut: recomputes both lineups' strength on every match (a whole-world season of about 10,000 matches takes
+    // 0.5 s in a release build, 10 s in debug); cache per club, cleared when ratings or squads change, when the
+    // simtool runs thousands of seasons.
     pub fn play_fixture(&mut self, index: usize, rng: &mut Rng) {
         let f = &self.fixtures[index];
         let cup = self.competitions[&f.competition].is_cup();
@@ -52,10 +54,9 @@ impl World {
         Some(next)
     }
 
-    /// The club's strength for the cheap simulation.
+    /// The club's strength for the cheap simulation: its lineup, each player rated in his slot.
     fn strength(&self, club: ClubId) -> f64 {
-        let overalls: Vec<u8> = self.clubs[&club].squad.iter().map(|p| self.players[p].overall).collect();
-        team_strength(&overalls)
+        team_strength(&self.lineup_ratings(club))
     }
 }
 
@@ -63,30 +64,13 @@ impl World {
 mod tests {
     use super::*;
     use crate::competition::{Competition, Rules};
-    use crate::model::{Club, Player};
+    use crate::testing::add_club_with_eleven;
 
-    /// A world with one league of `n` clubs, every club with one player, club `i` rated 50 + i.
+    /// A world with one league of `n` clubs, club `i` rated 50 + i.
     fn world(n: u32) -> World {
         let mut w = World::new(0, 0);
         for id in 1..=n {
-            let attrs = Default::default();
-            let player = Player {
-                id,
-                name: String::new(),
-                birth_date: String::new(),
-                positions: vec![],
-                attrs,
-                overall: 50 + id as u8,
-                potential: 50,
-                club: Some(id),
-                wage: 0,
-                contract_until: None,
-                value: 0,
-                form: 50,
-                fitness: 100,
-            };
-            w.players.insert(id, player);
-            w.clubs.insert(id, Club { id, name: format!("C{id}"), league: 1, squad: vec![id], budget: None, lineup: vec![] });
+            add_club_with_eleven(&mut w, id, 1, 50 + id as u8);
         }
         let clubs = (1..=n).collect();
         w.competitions.insert(1, Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), level: None, clubs });

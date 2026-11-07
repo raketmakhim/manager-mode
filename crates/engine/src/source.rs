@@ -3,6 +3,7 @@
 // (e.g. generated fictional leagues) exists to put behind it.
 use crate::attrs::{follow_real_change, Attr, Attrs};
 use crate::competition::{Competition, Rules};
+use crate::lineup::{Formation, Selection};
 use crate::model::*;
 use rusqlite::{Connection, Result};
 use std::collections::HashMap;
@@ -39,7 +40,8 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
                 league: r.get("league_id")?,
                 squad: vec![],
                 budget: r.get("budget")?,
-                lineup: vec![],
+                formation: Formation::default(),
+                selection: Selection::default(),
             },
             r.get::<_, String>("league_name")?,
             r.get::<_, String>("country")?,

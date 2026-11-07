@@ -131,6 +131,12 @@ impl Attr {
 }
 
 impl Attrs {
+    /// Sets one attribute (0-99). Test-only for now; drop the `cfg` when XP and training change attributes.
+    #[cfg(test)]
+    pub(crate) fn set(&mut self, attr: Attr, value: u8) {
+        self.0[attr as usize] = Some(value);
+    }
+
     /// Reads every attribute from a row of a query that selected `Attr::select_list()`.
     pub(crate) fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Attrs> {
         let mut attrs = Attrs::default();
