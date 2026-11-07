@@ -1,17 +1,14 @@
 # How we import the data
 
-Designed 2026-11-06. Based on the Kaggle files in `research/information/data/` (see [player-data-sources.md](../information/player-data-sources.md)). Column names below are from those files; the schema is a proposal, not built yet.
+Designed and built 2026-11-06 in `crates/import`. Based on the Kaggle files in `research/information/data/` (see [player-data-sources.md](../information/player-data-sources.md)). Column names below are from those files. Where the built tool differs from this design it is noted under "What was built" at the end.
 
 ## Approach
 
 A small Rust command-line tool, `crates/import`, reads the CSVs and writes one SQLite file, `history.db`. The game never reads CSVs; it only reads `history.db`.
 
 ```
-cargo run -p import --release -- \
-  --players research/information/data/male_players.csv \
-  --teams   research/information/data/male_teams.csv \
-  --coaches research/information/data/male_coaches.csv \
-  --out history.db
+cargo run -p import --release            # defaults: research/information/data -> history.db
+cargo run -p import --release -- <data_dir> <out.db>
 ```
 
 - Crates: `csv` (read), `rusqlite` (write). Rows are streamed, not loaded all at once.
@@ -73,6 +70,11 @@ The readers are the only place that knows about CSV column names. The engine's `
 - Does the game need `ratings` for all 10 editions loaded, or just the start edition plus lookups? Lookups, since the file is small.
 - Size of `history.db` once built; measure after the first import.
 
-## Next step
+## What was built
 
-Create the Cargo workspace (M1), then build `crates/import` against these three files and run the checks above.
+- It takes two optional arguments (data folder, output file) instead of one flag per CSV.
+- 180,021 ratings, 53,111 players, 1,145 teams and 1,369 coaches imported; 0 orphan clubs or coaches; 1,865 ratings have no club (free agents).
+- `leagues` also keeps `nationality_name` (the league's country), because several countries have a league with the same name. The game shows it as "Premier League (England)".
+- `team_editions` keeps only the columns the game uses so far: league, team ratings, coach, prestige, budget, club worth, stadium and a few tactics fields (not `rival_team`, set pieces or the finer tactics).
+- Checks run on every import: every CSV row landed, ids point at rows that exist, and a per-edition summary is printed.
+- The game side lives in `crates/engine`: `source::load_edition` builds a `World` from one edition, and `history::career` reads one player across all editions.

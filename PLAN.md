@@ -9,32 +9,35 @@ A playable single-player manager mode: one full season loop (squad -> fixtures -
 | Question | Default |
 |---|---|
 | Language | Rust (decided) |
-| Front end | Terminal UI with `ratatui` (alternative later: `egui` or Bevy for a graphical UI; the engine crate stays the same) |
+| Front end | `egui` window (`crates/gui`) plus a `ratatui` terminal view (`crates/tui`); both sit on the UI-free `engine` crate. Bevy only if a 2D match view is ever added |
 | Match presentation | Simulation only: you never play a match. Text commentary + stats, no 2D pitch |
-| Data | Historical yearly datasets (one per FIFA edition, ~20-30 years) in a read-only SQLite reference DB; start a career in any year. Generated fictional data stays as a fallback and for tests. Both sit behind a `DataSource` boundary in the engine. |
+| Data | Historical yearly datasets (one per FIFA edition) in a read-only SQLite file, `history.db`, built by `crates/import`; start a career in any covered year. Today: FIFA 15 to FC 24 (Kaggle); earlier editions need a scrape. `engine::load_edition` turns an edition into an in-memory `World`; it becomes a `DataSource` trait only if a second source appears. The data is not committed. |
 | Calendar | Every fixture has a `competition` and a `week` (a 7-day block). A club plays at most 3 matches in any week (`MAX_MATCHES_PER_WEEK`). Leagues are scheduled up front, one round a week; cups will draw each round after the last is played and place it with `first_free_week`. `calendar_problems()` must always be empty |
 | Player growth | Follow real ratings from the dataset while history matches; once the world diverges, simulated growth nudged toward the real curve; fully simulated after the last data year |
 | Saves | JSON via `serde`, one file per save |
 | Randomness | Seeded `rand_chacha`; every sim takes an explicit RNG, no global state |
 
-## Data model (minimal)
+## Data model
 
-- **Player**: id, name, age, position, attributes (pace, shooting, passing, defending, physical, goalkeeping), overall, potential, form, fitness, contract (wage, years), value
-- **Club**: id, name, budget, wage budget, squad, formation, lineup
-- **Fixture**: round, home, away, result
-- **Season**: year, league table, fixtures, current round
-- **GameState**: user club, all clubs, season, transfer list, date
+Built in `crates/engine/src/model.rs`; everything points at everything else by id.
+
+- **Player**: id, name, birth date, positions, 34 typed attributes, overall, potential, club, wage, contract end, value, form, fitness
+- **Club**: id, name, domestic league, squad, budget, lineup
+- **Competition**: id, name, country, kind (league or cup), clubs
+- **Fixture**: competition, round, week, home, away, result
+- **World**: edition, year, competitions, clubs, players, fixtures (the whole game state)
+- Still to add: league table, current week, transfer list, formation, the user's club
 
 ## Milestones
 
 ### M1 - Foundations
-- Cargo workspace with `engine`, `tui`, `simtool` crates; `cargo test` running
-- Data model types (plain structs, `serde` derives)
-- `DataSource` trait: returns clubs, players and ratings for year Y
-- Generated source first: 8-20 fictional clubs with 20-25 players each, round-robin fixture generator
+- Cargo workspace with `import`, `engine`, `gui`, `tui` crates (`simtool` comes with M2); `cargo test` running
+- Data model types (plain structs; `serde` derives are added with save/load in M5)
+- `load_edition`: clubs, players and ratings for one edition
+- Round-robin fixture generator with the weekly match limit
 - Real data import tool (separate from the game) that builds the SQLite reference DB from the yearly datasets; the dataset is not committed to the repo. **Done**: `crates/import` builds `history.db` from the Kaggle files (FIFA 15 to FC 24), design in `research/engineering/data-import.md`
 - **Done when**: tests confirm a generated league has valid fixtures (everyone plays everyone home and away)
-- **Status: done** except `simtool` (not needed until M2) and the generated fictional source (dropped: real data replaces it). Built: `crates/import`, `crates/engine` (`model`, `source::load_edition`, `fixtures::round_robin`), `crates/gui`, `crates/tui`
+- **Status: done** except `simtool` (not needed until M2). The generated fictional source was dropped: real data replaces it. Built: `crates/import`, `crates/engine` (`attrs`, `model`, `source`, `fixtures`, `history`), `crates/gui` (Season and Player scout tabs), `crates/tui`
 
 ### M2 - Match simulation
 - Team strength from lineup (attributes by position, formation fit, fitness, form)
@@ -44,9 +47,9 @@ A playable single-player manager mode: one full season loop (squad -> fixtures -
 
 ### M3 - Season loop
 - Play next round, update table, fitness and form
-- Lineup and formation screen (TUI)
-- League table and fixtures screens (TUI)
-- **Done when**: a full season can be played start to finish in the TUI
+- Lineup and formation screen (GUI)
+- League table screen (GUI); the fixtures screen already exists (Season tab)
+- **Done when**: a full season can be played start to finish in the GUI
 
 ### M4 - Transfers and finance
 - Player valuation, transfer list, bids with AI accept/reject logic
@@ -72,4 +75,4 @@ A playable single-player manager mode: one full season loop (squad -> fixtures -
 
 ## Next step
 
-Confirm the decisions table above, then start M1.
+M2: lineup picker, team strength, a simple goal-based match, then `simtool` to tune the balance.

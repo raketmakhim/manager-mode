@@ -2,12 +2,19 @@
 
 A football (soccer) career/manager-mode game in the style of FIFA's Career Mode. You run a club across seasons: set the lineup and tactics, simulate matches (no playable matches, simulation only), buy and sell players, and try to win trophies without going broke.
 
-> Status: planning. See [PLAN.md](PLAN.md) for the roadmap.
+> Status: early development. Milestone M1 (data, world model, fixtures, first window) is done; next is M2, the match simulation. See [PLAN.md](PLAN.md) for the roadmap.
 
-## Core features (v1)
+## What works today
 
-- Pick a club and start a career in any year covered by the data (e.g. 2008), with players developing as they really did
-- League with fixtures, results and a live table
+- Imports real FIFA player data (FIFA 15 to FC 24, 2014/15 to 2023/24) into one SQLite file
+- Loads any of those editions into the game: every league, club and squad, with the real attributes
+- Generates each league's season fixtures (everyone plays everyone home and away, at most 3 matches per club per week)
+- A window with a **Season** tab (start a season in any edition, browse fixtures by league, round or club) and a **Player scout** tab (search any player and see how their stats really changed in later editions)
+
+## Planned features (v1)
+
+- Pick a club and start a career in any year covered by the data, with players developing as they really did
+- League table and results
 - Squad management: players, positions, ratings, form, fitness
 - Formation and lineup selection
 - Match simulation with a text commentary feed
@@ -16,40 +23,42 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 
 ## Later
 
-Youth academy, cups and European competitions, training drills, board objectives, save/load, real-time 2D match view.
+Youth academy, cups and European competitions, training drills, board objectives, save/load, real-time 2D match view, editions before FIFA 15.
 
-## Tech (proposed)
+## Tech
 
-Rust, as a Cargo workspace. The game logic lives in a UI-free library crate so it can be simulated thousands of times fast and tested without a front end. The first front end is a terminal UI (`ratatui`). Saves are JSON files (`serde`). Randomness is a seeded `rand_chacha` RNG, so any match or season can be replayed exactly.
+Rust, as a Cargo workspace. The game logic lives in a UI-free library crate so it can be simulated thousands of times fast and tested without a front end. The window uses `egui`; there is also a terminal view (`ratatui`). Reference data is a read-only SQLite file (`rusqlite`); saves will be JSON files (`serde`). Randomness will be a seeded RNG, so any match or season can be replayed exactly.
 
 ## Getting started
 
-Only the data importer exists so far. Put the Kaggle CSVs in `research/information/data/` (`male_players.csv`, `male_teams.csv`, `male_coaches.csv`), then build the reference database:
+The player data is not in the repo. Put the Kaggle CSVs in `research/information/data/` (`male_players.csv`, `male_teams.csv`, `male_coaches.csv`), then build the reference database:
 
 ```
-cargo run -p import --release     # writes history.db (~46 MB, ~20 s)
+cargo run -p import --release     # writes history.db (~46 MB, under a minute)
 ```
 
-Then open the window. The Season tab starts a season in any edition and shows the fixtures; the Player scout tab shows how any player's stats really changed in later editions:
+Then open the window:
 
 ```
-cargo run -p gui --release        # graphical window with two tabs: Season and Player scout
-cargo run -p tui --release        # same thing in the terminal (Enter to open, Left/Right for seasons)
+cargo run -p gui --release        # tabs: Season and Player scout
+cargo run -p tui --release        # the player scout in the terminal (Enter to open, Left/Right for seasons)
+cargo test                        # tests that need history.db skip themselves if it is missing
 ```
 
-The rest, once scaffolded:
+Coming with M2:
 
 ```
-cargo run -p tui        # play
-cargo run -p simtool --release   # bulk-simulate matches/seasons and print balance stats
-cargo test
+cargo run -p simtool --release    # bulk-simulate matches/seasons and print balance stats
 ```
 
-## Project layout (planned)
+## Project layout
 
 ```
 crates/
-  engine/    match sim, transfers, season logic, data model, save/load (no UI)
-  tui/       terminal front end (ratatui)
-  simtool/   bulk simulation and balance reports
+  import/    builds history.db from the CSVs
+  engine/    game logic, no UI: attributes, world model, loading an edition, fixtures, player history
+  gui/       the window (egui): Season and Player scout tabs
+  tui/       the terminal player scout (ratatui)
+  simtool/   (planned, M2) bulk simulation and balance reports
+research/    notes behind the decisions
 ```
