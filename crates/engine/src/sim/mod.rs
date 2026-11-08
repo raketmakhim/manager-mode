@@ -42,7 +42,12 @@ pub struct MatchPlayer {
     pub finishing: u8,
     /// How well he sets up goals, 0-99: a weighted mean of vision (50%), short passing (20%), long passing (11%), crossing (11%) and dribbling (8%).
     pub creativity: u8,
+    /// How hard he plays, 0-99: decides how often he fouls.
+    pub aggression: u8,
 }
+
+/// The aggression of a player whose data lacks the attribute: about the mean outfield player.
+pub const AVERAGE_AGGRESSION: u8 = 60;
 
 /// What a model needs to know about one side.
 #[derive(Clone, Copy, Debug)]
@@ -69,7 +74,7 @@ impl MatchTeam {
     pub(crate) fn flat(rating: u8) -> MatchTeam {
         use crate::lineup::Formation;
         let slots = Formation::FourFourTwo.slots();
-        MatchTeam { players: std::array::from_fn(|i| MatchPlayer { id: i as PlayerId, position: slots[i], rating, finishing: rating, creativity: rating }) }
+        MatchTeam { players: std::array::from_fn(|i| MatchPlayer { id: i as PlayerId, position: slots[i], rating, finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION }) }
     }
 }
 

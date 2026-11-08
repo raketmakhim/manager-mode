@@ -3,7 +3,7 @@ use crate::attrs::Attr;
 use crate::lineup::rating_at;
 use crate::model::{ClubId, Player, Position, World};
 use crate::rng::Rng;
-use crate::sim::{simulate, MatchInput, MatchPlayer, MatchTeam};
+use crate::sim::{simulate, MatchInput, MatchPlayer, MatchTeam, AVERAGE_AGGRESSION};
 
 impl World {
     /// Plays the fixture at `index` in `fixtures` with its competition's match model and stores the result. Cup ties
@@ -73,7 +73,7 @@ impl World {
         let lineup = self.lineup_of(club);
         let players = std::array::from_fn(|i| match lineup[i] {
             Some(id) => match_player(&self.players[&id], slots[i]),
-            None => MatchPlayer { id: 0, position: slots[i], rating: 0, finishing: 0, creativity: 0 },
+            None => MatchPlayer { id: 0, position: slots[i], rating: 0, finishing: 0, creativity: 0, aggression: 0 },
         });
         MatchTeam { players }
     }
@@ -89,6 +89,7 @@ fn match_player(player: &Player, slot: Position) -> MatchPlayer {
         rating,
         finishing: attr(Attr::Finishing),
         creativity: creativity(attr(Attr::Vision), attr(Attr::ShortPassing), attr(Attr::LongPassing), attr(Attr::Crossing), attr(Attr::Dribbling)),
+        aggression: player.attrs[Attr::Aggression].unwrap_or(AVERAGE_AGGRESSION),
     }
 }
 

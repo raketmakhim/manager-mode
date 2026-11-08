@@ -57,6 +57,12 @@ const FOULS_PER_SIDE: f64 = 12.65;
 /// Chance a foul is booked, and chance it is a straight red card.
 const YELLOW_PER_FOUL: f64 = 0.18;
 const RED_PER_FOUL: f64 = 0.004;
+/// Each point of aggression multiplies a player's share of his side's fouls by this (as an exponent): a 75 commits
+/// about 2.5 times the fouls of a 50. Real Messi is booked about 0.09 times a match and Ronaldo 0.125, against about
+/// 0.2 for an average outfield player (research/game-features/simulation-balance.md).
+const FOULS_PER_AGGRESSION_POINT: f64 = 0.037;
+/// No player commits more than this share of his side's fouls.
+const MAX_FOUL_SHARE: f64 = 0.2;
 /// A player already on a yellow card is booked this share as often: he plays more carefully. Without it second
 /// yellows make red cards about two and a half times as common as in real football.
 const BOOKED_CAUTION: f64 = 0.25;
@@ -245,8 +251,9 @@ impl Timeline<'_> {
     }
 
     fn foul(&mut self, minute: u8, side: Side, rng: &mut Rng) {
-        let slot = 1 + rng.below(10); // the goalkeeper does not foul
-        let player = team(self.input, side).players[slot].id;
+        let players = &team(self.input, side).players;
+        let slot = pick(players, foul_weight, MAX_FOUL_SHARE, rng);
+        let player = players[slot].id;
         self.events.push(Event::Foul { minute, side, player });
         let booked = &mut self.yellows[side_index(side)][slot];
         let caution = if *booked { BOOKED_CAUTION } else { 1.0 };
@@ -257,6 +264,14 @@ impl Timeline<'_> {
             self.events.push(Event::Red { minute, side, player });
         }
     }
+}
+
+/// How likely a player is to commit a foul: more for an aggressive one. The goalkeeper and an empty slot never do.
+fn foul_weight(p: &MatchPlayer) -> f64 {
+    if p.is_empty() || p.position == Position::Gk {
+        return 0.0;
+    }
+    (FOULS_PER_AGGRESSION_POINT * p.aggression as f64).exp()
 }
 
 /// How likely a player is to take a shot: the shots per 90 minutes of his slot, raised by how well he finishes.
@@ -421,9 +436,26 @@ mod tests {
     #[test]
     fn an_empty_slot_never_shoots_or_sets_up_a_goal() {
         let mut team = MatchTeam::flat(70);
-        team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0 };
+        team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0, aggression: 0 };
         assert_eq!((shot_weight(&team.players[10]), assist_weight(&team.players[10])), (0.0, 0.0));
         let mut rng = Rng::new(2);
         assert!((0..2000).all(|_| pick(&team.players, shot_weight, MAX_SHOT_SHARE, &mut rng) != 10));
+    }
+
+    #[test]
+    fn aggressive_players_foul_more_and_the_goalkeeper_never_does() {
+        let mut team = MatchTeam::flat(70);
+        team.players[5].aggression = 90;
+        team.players[6].aggression = 30;
+        assert!(foul_weight(&team.players[5]) > 4.0 * foul_weight(&team.players[6]));
+        assert_eq!(foul_weight(&team.players[0]), 0.0, "slot 0 is the goalkeeper");
+        let mut rng = Rng::new(4);
+        let mut fouls = [0u32; 11];
+        for _ in 0..5000 {
+            fouls[pick(&team.players, foul_weight, MAX_FOUL_SHARE, &mut rng)] += 1;
+        }
+        assert_eq!(fouls[0], 0);
+        assert!(fouls[5] > 3 * fouls[6], "{} fouls against {}", fouls[5], fouls[6]);
+        assert!(fouls[5] as f64 / 5000.0 <= MAX_FOUL_SHARE + 0.03, "no one takes more than the share limit");
     }
 }
