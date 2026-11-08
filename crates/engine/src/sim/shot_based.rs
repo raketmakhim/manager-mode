@@ -1,15 +1,18 @@
 //! The shot-based match model: a match is a timeline of shots, fouls and what follows from them. Possession is worked
 //! out first from the midfields and decides how many shots each side gets; each shot picks a shooter, then is off
 //! target, saved or a goal; fouls bring cards and missed shots bring corners. The score is the goals on the timeline.
-//! Pure functions, no `World`. Design and real figures: `research/game-features/match-simulation-methods.md`.
+//! Who shoots, scores and assists is the `scoring` model's job and who fouls and is carded the `discipline` model's;
+//! this file only sequences the timeline. Pure functions, no `World`. Design and real figures: `research/game-features/match-simulation-methods.md`.
 use super::cheap::{poisson, shootout};
-use super::{Event, MatchDetail, MatchInput, MatchPlayer, MatchReport, MatchTeam};
-use crate::model::{Line, Position};
+use super::discipline::{self, Card, DisciplineModel, DEFAULT_DISCIPLINE_MODEL, FOULS_PER_SIDE};
+use super::scoring::{self, ScoringModel, DEFAULT_SCORING_MODEL};
+use super::{Event, MatchDetail, MatchInput, MatchReport, MatchTeam};
+use crate::model::{Line, PlayerId};
 use crate::outcome::{Outcome, Side};
 use crate::rng::Rng;
 
 // Tuned with `dev-tools/simtool --model shot-based` against the real big-five figures (shots 24.6, 36% on target,
-// corners 9.9, fouls 25.3, yellow 4.10, red 0.20 per match) and the real tables: see
+// corners 9.9 per match) and the real tables: see
 // `research/game-features/simulation-balance.md`. Rerun the simtool after changing any of them.
 
 /// Shots a side takes in 90 minutes against an equal side with half the ball, before the home bonus.
@@ -20,52 +23,12 @@ const HOME_SHOT_FACTOR: f64 = 1.17;
 const SHOT_RATE_PER_POINT: f64 = 0.024;
 /// Chance a shot is on target.
 const ON_TARGET: f64 = 0.36;
-/// Chance a shot on target is a goal, for a shooter with the reference finishing against a keeper of the reference rating.
-const GOAL_PER_SHOT_ON_TARGET: f64 = 0.296;
-/// The finishing and goalkeeper rating that count as average.
-const REFERENCE_RATING: f64 = 70.0;
-/// Each point of the shooter's finishing above the reference changes that chance by this share (exponent), within
-/// `FINISHING_FACTOR_RANGE`. It is his own finishing, not the gap to the keeper: a striker in a weak league does not
-/// score like an elite one just because the keepers there are weak.
-const FINISHING_PER_POINT: f64 = 0.03;
-const FINISHING_FACTOR_RANGE: (f64, f64) = (0.6, 2.0);
-/// The same for each point the goalkeeper's rating is below the reference.
-const KEEPER_PER_POINT: f64 = 0.012;
-const KEEPER_FACTOR_RANGE: (f64, f64) = (0.8, 1.25);
-/// Each point of finishing multiplies a player's share of his side's shots by this (as an exponent): a 92 takes
-/// about 3 times the shots of a 70 in the same slot. Real stars take far more shots than a flat weight gives.
-const SHOTS_PER_FINISHING_POINT: f64 = 0.05;
-/// No player takes more than this share of his side's shots, however good he is and however weak the rest are (the
-/// best real strikers take about a quarter). Without a limit a lone good finisher in a weak side scored
-/// more than a goal a match.
-const MAX_SHOT_SHARE: f64 = 0.28;
-/// The same limit for the share of the assists.
-const MAX_ASSIST_SHARE: f64 = 0.45;
-/// The same for setting up goals, from creativity.
-const ASSISTS_PER_CREATIVITY_POINT: f64 = 0.05;
 /// A side that leads keeps this share of its later shots: teams sit back, which is also why draws are common.
 const LEADER_KEEPS_SHOOTING: f64 = 0.5;
 /// Chance a shot that is not scored wins a corner.
 const CORNER_PER_MISSED_SHOT: f64 = 0.45;
-/// Chance a goal is set up by a teammate.
-const GOAL_ASSISTED: f64 = 0.70;
 /// Share of the minutes a 90-minute period puts in the first half (real goals: 44.2%).
 const FIRST_HALF_SHARE: f64 = 0.42;
-
-/// Fouls a side commits in 90 minutes.
-const FOULS_PER_SIDE: f64 = 12.65;
-/// Chance a foul is booked, and chance it is a straight red card.
-const YELLOW_PER_FOUL: f64 = 0.18;
-const RED_PER_FOUL: f64 = 0.004;
-/// Each point of aggression multiplies a player's share of his side's fouls by this (as an exponent): a 75 commits
-/// about 2.5 times the fouls of a 50. Real Messi is booked about 0.09 times a match and Ronaldo 0.125, against about
-/// 0.2 for an average outfield player (research/game-features/simulation-balance.md).
-const FOULS_PER_AGGRESSION_POINT: f64 = 0.037;
-/// No player commits more than this share of his side's fouls.
-const MAX_FOUL_SHARE: f64 = 0.2;
-/// A player already on a yellow card is booked this share as often: he plays more carefully. Without it second
-/// yellows make red cards about two and a half times as common as in real football.
-const BOOKED_CAUTION: f64 = 0.25;
 
 /// The home side's share of the ball against an equal side: a little over half.
 const HOME_POSSESSION: f64 = 0.52;
@@ -116,13 +79,26 @@ struct Planned {
     action: Action,
 }
 
+/// The parts of the match that are separate, swappable models. `DEFAULT_PARTS` is what every competition uses.
+#[derive(Clone, Copy, Debug)]
+pub struct Parts {
+    pub scoring: ScoringModel,
+    pub discipline: DisciplineModel,
+}
+
+pub const DEFAULT_PARTS: Parts = Parts { scoring: DEFAULT_SCORING_MODEL, discipline: DEFAULT_DISCIPLINE_MODEL };
+
 pub(super) fn simulate(input: &MatchInput, rng: &mut Rng) -> MatchReport {
+    simulate_with(input, DEFAULT_PARTS, rng)
+}
+
+pub fn simulate_with(input: &MatchInput, parts: Parts, rng: &mut Rng) -> MatchReport {
     let home_possession = home_possession(input, rng);
-    let mut events = play_period(input, home_possession, Period::Regulation, (0, 0), rng);
+    let mut events = play_period(input, parts, home_possession, Period::Regulation, (0, 0), &[], rng);
     let full_time = goals(&events);
     let (mut extra_time, mut shootout_score) = (None, None);
     if input.must_have_winner && full_time.0 == full_time.1 {
-        let extra_events = play_period(input, home_possession, Period::ExtraTime, full_time, rng);
+        let extra_events = play_period(input, parts, home_possession, Period::ExtraTime, full_time, &events, rng);
         let extra = goals(&extra_events);
         events.extend(extra_events);
         extra_time = Some(extra);
@@ -191,9 +167,15 @@ fn plan(input: &MatchInput, home_possession: f64, period: Period, rng: &mut Rng)
     planned
 }
 
-/// Plays one period and returns its events. `score` is the score when the period starts.
-fn play_period(input: &MatchInput, home_possession: f64, period: Period, score: (u8, u8), rng: &mut Rng) -> Vec<Event> {
-    let mut timeline = Timeline { input, score: [score.0, score.1], yellows: [[false; 11]; 2], events: vec![] };
+/// Plays one period and returns its events. `score` is the score when the period starts and `earlier` the events before it (whoever was sent off stays off).
+fn play_period(input: &MatchInput, parts: Parts, home_possession: f64, period: Period, score: (u8, u8), earlier: &[Event], rng: &mut Rng) -> Vec<Event> {
+    let teams = [input.home, input.away];
+    let mut timeline = Timeline { teams, parts, score: [score.0, score.1], yellows: [[false; 11]; 2], events: vec![] };
+    for e in earlier {
+        if let Event::Red { side, player, .. } = *e {
+            timeline.send_off(side, player);
+        }
+    }
     for p in plan(input, home_possession, period, rng) {
         match p.action {
             Action::Shot => timeline.shot(p.minute, p.side, rng),
@@ -204,8 +186,10 @@ fn play_period(input: &MatchInput, home_possession: f64, period: Period, score: 
 }
 
 /// The match as it is played out, event by event.
-struct Timeline<'a> {
-    input: &'a MatchInput,
+struct Timeline {
+    /// Home and away as they stand: a player who is sent off is replaced by an empty slot, which never shoots, assists or fouls.
+    teams: [MatchTeam; 2],
+    parts: Parts,
     /// Goals so far: home, away.
     score: [u8; 2],
     /// Which players of each side (by slot) are on a yellow card.
@@ -220,26 +204,21 @@ fn side_index(side: Side) -> usize {
     }
 }
 
-impl Timeline<'_> {
+impl Timeline {
     fn shot(&mut self, minute: u8, side: Side, rng: &mut Rng) {
         let (mine, theirs) = (side_index(side), side_index(other(side)));
         if self.score[mine] > self.score[theirs] && rng.unit() >= LEADER_KEEPS_SHOOTING {
             return;
         }
-        let (me, them) = (team(self.input, side), team(self.input, other(side)));
-        let shooter = me.players[pick(&me.players, shot_weight, MAX_SHOT_SHARE, rng)];
+        let (me, them) = (self.teams[mine], self.teams[theirs]);
+        let shooter = me.players[scoring::shooter(self.parts.scoring, &me.players, rng)];
         let on_target = rng.unit() < ON_TARGET;
         self.events.push(Event::Shot { minute, side, shooter: shooter.id, on_target });
         if on_target {
             let keeper = them.players[0];
-            let finishing = (FINISHING_PER_POINT * (shooter.finishing as f64 - REFERENCE_RATING)).exp().clamp(FINISHING_FACTOR_RANGE.0, FINISHING_FACTOR_RANGE.1);
-            let keeping = (KEEPER_PER_POINT * (REFERENCE_RATING - keeper.rating as f64)).exp().clamp(KEEPER_FACTOR_RANGE.0, KEEPER_FACTOR_RANGE.1);
-            if rng.unit() < GOAL_PER_SHOT_ON_TARGET * finishing * keeping {
+            if rng.unit() < scoring::goal_chance(self.parts.scoring, &shooter, &keeper) {
                 self.score[mine] += 1;
-                let assister = (rng.unit() < GOAL_ASSISTED).then(|| {
-                    let weight = |p: &MatchPlayer| if p.id == shooter.id { 0.0 } else { assist_weight(p) };
-                    me.players[pick(&me.players, weight, MAX_ASSIST_SHARE, rng)].id
-                });
+                let assister = scoring::assister(self.parts.scoring, &me.players, &shooter, rng).map(|slot| me.players[slot].id);
                 self.events.push(Event::Goal { minute, side, scorer: shooter.id, assister });
                 return;
             }
@@ -251,86 +230,32 @@ impl Timeline<'_> {
     }
 
     fn foul(&mut self, minute: u8, side: Side, rng: &mut Rng) {
-        let players = &team(self.input, side).players;
-        let slot = pick(players, foul_weight, MAX_FOUL_SHARE, rng);
-        let player = players[slot].id;
+        let players = &self.teams[side_index(side)].players;
+        let booked = &mut self.yellows[side_index(side)];
+        let foul = discipline::foul(self.parts.discipline, players, booked, rng);
+        let player = players[foul.slot].id;
         self.events.push(Event::Foul { minute, side, player });
-        let booked = &mut self.yellows[side_index(side)][slot];
-        let caution = if *booked { BOOKED_CAUTION } else { 1.0 };
-        if rng.unit() < YELLOW_PER_FOUL * caution {
-            let second = std::mem::replace(booked, true);
-            self.events.push(if second { Event::Red { minute, side, player } } else { Event::Yellow { minute, side, player } });
-        } else if rng.unit() < RED_PER_FOUL {
-            self.events.push(Event::Red { minute, side, player });
+        match foul.card {
+            Card::None => {}
+            Card::Yellow => {
+                booked[foul.slot] = true;
+                self.events.push(Event::Yellow { minute, side, player });
+            }
+            Card::Red => {
+                self.events.push(Event::Red { minute, side, player });
+                self.send_off(side, player);
+            }
         }
     }
-}
 
-/// How likely a player is to commit a foul: more for an aggressive one. The goalkeeper and an empty slot never do.
-fn foul_weight(p: &MatchPlayer) -> f64 {
-    if p.is_empty() || p.position == Position::Gk {
-        return 0.0;
-    }
-    (FOULS_PER_AGGRESSION_POINT * p.aggression as f64).exp()
-}
-
-/// How likely a player is to take a shot: the shots per 90 minutes of his slot, raised by how well he finishes.
-// The three line averages (defenders 0.48, midfielders 1.45, attackers 2.81) are real Premier League 2014/15 figures
-// (research/game-features/match-simulation-methods.md). The split inside the midfield and attack is our own guess,
-// chosen so a 4-4-2's midfield still averages 1.45: wide and attacking midfielders shoot about twice as often as
-// central ones.
-fn shot_weight(p: &MatchPlayer) -> f64 {
-    use Position::*;
-    let per_90 = match p.position {
-        _ if p.is_empty() => 0.0,
-        Gk => 0.0,
-        Lwb | Lb | Cb | Rb | Rwb => 0.48,
-        Cdm => 0.8,
-        Cm => 1.0,
-        Lm | Rm | Cam => 2.0,
-        Lw | Rw => 2.6,
-        Cf | St => 2.81,
-    };
-    per_90 * (SHOTS_PER_FINISHING_POINT * p.finishing as f64).exp()
-}
-
-/// How likely a player is to set up a goal: the assists per 90 minutes of his slot, raised by his creativity. The
-/// line averages (defenders 0.04, midfielders 0.12, attackers 0.11) are real; the split inside them is our own guess.
-fn assist_weight(p: &MatchPlayer) -> f64 {
-    use Position::*;
-    let per_90 = match p.position {
-        _ if p.is_empty() => 0.0,
-        Gk => 0.0,
-        Cb => 0.03,
-        Lwb | Lb | Rb | Rwb => 0.06,
-        Cdm => 0.04,
-        Cm => 0.08,
-        Lm | Rm | Cam => 0.20,
-        Lw | Rw => 0.22,
-        Cf | St => 0.18,
-    };
-    per_90 * (ASSISTS_PER_CREATIVITY_POINT * p.creativity as f64).exp()
-}
-
-/// The index of a player chosen at random with chances in proportion to `weight`, except that nobody gets more than
-/// `max_share` of the chances (the rest is shared by the others in proportion). If every weight is 0, the first.
-fn pick(players: &[MatchPlayer; 11], weight: impl Fn(&MatchPlayer) -> f64, max_share: f64, rng: &mut Rng) -> usize {
-    let mut weights = players.each_ref().map(weight);
-    // Cutting one player down can push another over the limit, so go round a few times.
-    for _ in 0..3 {
-        let total: f64 = weights.iter().sum();
-        for w in weights.iter_mut().filter(|w| **w > max_share * total) {
-            *w = max_share / (1.0 - max_share) * (total - *w);
+    /// Takes the player off the pitch for the rest of the match. The goalkeeper is never sent off here (he never
+    /// fouls), so slot 0 stays and the other side always has a keeper to beat.
+    fn send_off(&mut self, side: Side, player: PlayerId) {
+        let players = &mut self.teams[side_index(side)].players;
+        if let Some(slot) = players.iter().skip(1).position(|p| p.id == player) {
+            players[slot + 1].id = 0;
         }
     }
-    let mut left = rng.unit() * weights.iter().sum::<f64>();
-    for (i, w) in weights.iter().enumerate() {
-        left -= w;
-        if left < 0.0 {
-            return i;
-        }
-    }
-    0
 }
 
 /// Goals scored by each side: (home, away).
@@ -345,6 +270,46 @@ mod tests {
 
     fn input(home: u8, away: u8, must_have_winner: bool) -> MatchInput {
         MatchInput { home: MatchTeam::flat(home), away: MatchTeam::flat(away), must_have_winner }
+    }
+
+    #[test]
+    fn every_combination_of_parts_keeps_the_timeline_rules() {
+        for &scoring in ScoringModel::ALL {
+            for &discipline in DisciplineModel::ALL {
+                let parts = Parts { scoring, discipline };
+                for seed in 0..100 {
+                    let report = simulate_with(&input(72, 70, true), parts, &mut Rng::new(seed));
+                    let events = report.detail.expect("detail").events;
+                    let count = |f: fn(&Event) -> bool| events.iter().filter(|e| f(e)).count();
+                    let on_target = count(|e| matches!(e, Event::Shot { on_target: true, .. }));
+                    assert_eq!(on_target, count(|e| matches!(e, Event::Goal { .. })) + count(|e| matches!(e, Event::Save { .. })), "{parts:?} seed {seed}");
+                    assert!(events.windows(2).all(|w| minute(&w[0]) <= minute(&w[1])), "{parts:?} seed {seed}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_player_sent_off_does_nothing_more_in_the_match_extra_time_included() {
+        for seed in 0..400 {
+            let events = play(&input(70, 70, true), seed).1.events;
+            let mut off = vec![];
+            for e in &events {
+                match *e {
+                    Event::Red { side, player, .. } => {
+                        assert!(!off.contains(&(side, player)), "seed {seed}: sent off twice");
+                        off.push((side, player));
+                    }
+                    Event::Shot { side, shooter: p, .. } | Event::Foul { side, player: p, .. } | Event::Yellow { side, player: p, .. } => {
+                        assert!(!off.contains(&(side, p)), "seed {seed}: acted after the red card");
+                    }
+                    Event::Goal { side, scorer, assister, .. } => {
+                        assert!(!off.contains(&(side, scorer)) && assister.is_none_or(|a| !off.contains(&(side, a))), "seed {seed}");
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn play(input: &MatchInput, seed: u64) -> (MatchReport, MatchDetail) {
@@ -422,40 +387,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn nobody_takes_more_than_the_largest_share_of_the_shots() {
-        let mut team = MatchTeam::flat(60);
-        team.players[10].finishing = 99; // one star striker in a weak side
-        let mut rng = Rng::new(1);
-        let star = (0..5000).filter(|_| pick(&team.players, shot_weight, MAX_SHOT_SHARE, &mut rng) == 10).count() as f64 / 5000.0;
-        assert!((MAX_SHOT_SHARE - 0.03..MAX_SHOT_SHARE + 0.03).contains(&star), "the star took {star} of the shots");
-    }
-
-    #[test]
-    fn an_empty_slot_never_shoots_or_sets_up_a_goal() {
-        let mut team = MatchTeam::flat(70);
-        team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0, aggression: 0 };
-        assert_eq!((shot_weight(&team.players[10]), assist_weight(&team.players[10])), (0.0, 0.0));
-        let mut rng = Rng::new(2);
-        assert!((0..2000).all(|_| pick(&team.players, shot_weight, MAX_SHOT_SHARE, &mut rng) != 10));
-    }
-
-    #[test]
-    fn aggressive_players_foul_more_and_the_goalkeeper_never_does() {
-        let mut team = MatchTeam::flat(70);
-        team.players[5].aggression = 90;
-        team.players[6].aggression = 30;
-        assert!(foul_weight(&team.players[5]) > 4.0 * foul_weight(&team.players[6]));
-        assert_eq!(foul_weight(&team.players[0]), 0.0, "slot 0 is the goalkeeper");
-        let mut rng = Rng::new(4);
-        let mut fouls = [0u32; 11];
-        for _ in 0..5000 {
-            fouls[pick(&team.players, foul_weight, MAX_FOUL_SHARE, &mut rng)] += 1;
-        }
-        assert_eq!(fouls[0], 0);
-        assert!(fouls[5] > 3 * fouls[6], "{} fouls against {}", fouls[5], fouls[6]);
-        assert!(fouls[5] as f64 / 5000.0 <= MAX_FOUL_SHARE + 0.03, "no one takes more than the share limit");
     }
 }

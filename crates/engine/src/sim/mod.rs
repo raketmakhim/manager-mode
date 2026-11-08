@@ -7,10 +7,20 @@
 //! The report always has the score. A model that plays the match out also returns its events as `detail`; stats and
 //! match ratings are worked out from those events, so any model that emits the events they need works with them.
 //! Adding a model: a new file, a `MatchModel` variant and an arm in `simulate`; the compiler lists the rest.
+//!
+//! Inside the shot-based model, two parts are models of their own, swapped the same way (a variant and an arm; the
+//! contract tests run through `ALL`): `scoring` (who shoots, scores and assists) and `discipline` (who fouls and is
+//! carded). Player match ratings are a third, in `rating`.
 mod cheap;
+mod discipline;
+mod pick;
+mod scoring;
 mod shot_based;
 
 pub use cheap::team_strength;
+pub use discipline::DisciplineModel;
+pub use scoring::ScoringModel;
+pub use shot_based::{simulate_with as simulate_shot_based, Parts as ShotBasedParts, DEFAULT_PARTS as DEFAULT_SHOT_BASED_PARTS};
 
 use crate::model::{PlayerId, Position};
 use crate::outcome::{Outcome, Side};
