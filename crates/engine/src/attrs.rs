@@ -131,7 +131,16 @@ impl Attr {
 }
 
 impl Attrs {
-    /// Sets one attribute (0-99). Test-only for now; drop the `cfg` when XP and training change attributes.
+    /// Moves one attribute by `change` points, kept inside 1-99, and returns how far it actually moved. An attribute
+    /// this edition lacks stays missing and does not move.
+    pub(crate) fn shift(&mut self, attr: Attr, change: i8) -> i8 {
+        let Some(value) = self.0[attr as usize] else { return 0 };
+        let moved = (value as i16 + change as i16).clamp(1, 99) as u8;
+        self.0[attr as usize] = Some(moved);
+        (moved as i16 - value as i16) as i8
+    }
+
+    /// Sets one attribute (0-99). Test-only for now; drop the `cfg` when training sets attributes.
     #[cfg(test)]
     pub(crate) fn set(&mut self, attr: Attr, value: u8) {
         self.0[attr as usize] = Some(value);

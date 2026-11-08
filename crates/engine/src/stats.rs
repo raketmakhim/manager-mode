@@ -1,10 +1,12 @@
 //! Player stats: what each player did, added up from the events of the matches played. A match gives each player in
 //! its lineup one `PlayerStats` (a pure function of the match events); `World` adds them to the player's season
 //! totals for the competition. Only matches whose model returns events (`MatchDetail`) count.
+use crate::development::{match_xp, MatchPlay, DEFAULT_EXPERIENCE_MODEL};
 use crate::model::{CompetitionId, PlayerId, Position, World};
 use crate::outcome::{Outcome, Side};
-use crate::rating::{rate, RatingInput, RatingModel, TeamResult, DEFAULT_RATING_MODEL};
-use crate::sim::{Event, MatchDetail};
+use crate::rating::{neutral_rating, rate, RatingInput, RatingModel, TeamResult, DEFAULT_RATING_MODEL};
+use crate::rng::Rng;
+use crate::sim::{Event, LiveMatch, MatchDetail};
 use std::collections::BTreeMap;
 
 /// What a player did, in one match or added up over many. Counts, except `minutes`.
@@ -31,6 +33,8 @@ pub struct PlayerStats {
     pub rated: u16,
     /// Matches he was the best player of.
     pub player_of_the_match: u16,
+    /// Experience points earned (1 to 10 a match played; see `development`).
+    pub xp: u32,
 }
 
 /// A clean sheet needs at least this many minutes on the pitch.
@@ -52,6 +56,7 @@ impl PlayerStats {
         self.rating_tenths += o.rating_tenths;
         self.rated += o.rated;
         self.player_of_the_match += o.player_of_the_match;
+        self.xp += o.xp;
     }
 
     /// His average match rating (3.0 to 10.0), or `None` if he has not been rated yet.
@@ -151,6 +156,15 @@ pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: Rating
             row.stats.rated = 1;
         }
         row.stats.player_of_the_match = (best == Some(i)) as u16;
+        let play = MatchPlay {
+            minutes: row.stats.minutes,
+            rating: *rating,
+            neutral_rating: neutral_rating(rating_model, row.position, row.overall),
+            overall: row.overall,
+            line: row.position.line(),
+            player_of_the_match: best == Some(i),
+        };
+        row.stats.xp = match_xp(DEFAULT_EXPERIENCE_MODEL, &play) as u32;
     }
     rows.into_iter().map(|r| (r.id, r.stats)).collect()
 }
@@ -172,11 +186,23 @@ fn player_of_the_match(rows: &[Row], ratings: &[Option<f32>], winner: Option<Sid
     best.map(|(i, _, _)| i)
 }
 
+/// The stats every player earned in a live match that is over (see `LiveMatch::is_over`), for the screen that shows
+/// the match's XP before the match is stored.
+pub fn live_match_stats(live: &LiveMatch) -> Vec<(PlayerId, PlayerStats)> {
+    let report = live.clone().into_report(&mut Rng::new(0));
+    let detail = report.detail.expect("a live match has events");
+    match_stats(&detail, &report.outcome, DEFAULT_RATING_MODEL)
+}
+
 impl World {
     /// Adds a played match to its players' totals for this season and competition.
     pub fn record_match(&mut self, competition: CompetitionId, detail: &MatchDetail, outcome: &Outcome) {
         for (player, stats) in match_stats(detail, outcome, DEFAULT_RATING_MODEL) {
             self.stats.entry((player, self.year, competition)).or_default().add(&stats);
+            self.last_match_xp.insert(player, stats.xp as u8);
+            if let Some(p) = self.players.get_mut(&player) {
+                p.xp = p.xp.saturating_add(stats.xp as u16);
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 //! The squad view: your players with how their ratings changed since the start of an earlier season.
 use crate::{GREEN, RED};
 use eframe::egui::{self, Color32, RichText};
-use engine::{Attrs, ClubId, Player, PlayerId, Position, World, KEEPER, OUTFIELD};
+use engine::{Attrs, ClubId, Player, PlayerId, Position, World, KEEPER, OUTFIELD, XP_PER_LEVEL};
 use std::collections::HashMap;
 
 /// A player's ratings at one moment.
@@ -42,10 +42,16 @@ pub struct State {
     open: Option<PlayerId>,
 }
 
-/// Shows the squad of `club`, best first, with changes since the chosen checkpoint.
+/// Shows the squad of `club`, best first, with changes since the chosen checkpoint. Clicking a player opens his page.
 pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, checkpoints: &[Checkpoint], state: &mut State) {
     let Some(last) = checkpoints.len().checked_sub(1) else { return };
     let chosen = state.compare.unwrap_or(last.saturating_sub(1)).min(last);
+    if let Some(p) = state.open.and_then(|id| world.players.get(&id)) {
+        if player_page(ui, world, p, &checkpoints[chosen]) {
+            state.open = None;
+        }
+        return;
+    }
     ui.horizontal(|ui| {
         ui.label("Change since the start of:");
         egui::ComboBox::from_id_salt("squad_compare").selected_text(&checkpoints[chosen].season).show_ui(ui, |ui| {
@@ -54,45 +60,120 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, checkpoints: &[Checkpo
             }
         });
     });
+    ui.label(format!("XP: every match gives 1 to 10 (less for a high overall). At {XP_PER_LEVEL} XP a player levels up and the rest stays in his bar. Last: XP of his last match."));
     ui.add_space(6.0);
     let then = &checkpoints[chosen].ratings;
 
     let mut players: Vec<_> = world.clubs[&club].squad.iter().map(|id| &world.players[id]).collect();
     players.sort_by_key(|p| std::cmp::Reverse(p.overall));
-    ui.columns(2, |columns| {
-        egui::ScrollArea::vertical().id_salt("squad_table").show(&mut columns[0], |ui| {
-            egui::Grid::new("squad").striped(true).min_col_width(40.0).show(ui, |ui| {
-                for h in ["Player", "Pos", "Age", "Overall", "", "Potential", "", "Apps", "Goals", "Assists", "Rating"] {
-                    ui.label(RichText::new(h).strong());
-                }
-                ui.end_row();
-                for p in players {
-                    let was = then.get(&p.id);
-                    let position = p.positions.first().map_or(String::new(), |pos| pos.code().to_string());
-                    if ui.selectable_label(state.open == Some(p.id), &p.name).clicked() {
-                        state.open = Some(p.id);
-                    }
-                    ui.label(position);
-                    ui.label(age(&p.birth_date, world.year).map_or(String::new(), |a| a.to_string()));
-                    ui.label(p.overall.to_string());
-                    change_label(ui, was.map(|w| p.overall as i32 - w.overall as i32));
-                    ui.label(p.potential.to_string());
-                    change_label(ui, was.map(|w| p.potential as i32 - w.potential as i32));
-                    let stats = world.season_stats(p.id);
-                    for n in [stats.appearances, stats.goals, stats.assists] {
-                        ui.label(n.to_string());
-                    }
-                    ui.label(stats.average_rating().map_or("-".to_string(), |r| format!("{r:.1}")));
-                    ui.end_row();
-                }
-            });
-        });
-        match state.open.and_then(|id| world.players.get(&id)) {
-            Some(p) => attribute_changes(&mut columns[1], p, then.get(&p.id).map(|w| &w.attrs)),
-            None => {
-                columns[1].label("Click a player to see how each attribute changed.");
+    egui::ScrollArea::both().id_salt("squad_table").show(ui, |ui| {
+        egui::Grid::new("squad").striped(true).min_col_width(40.0).show(ui, |ui| {
+            for h in ["Player", "Pos", "Age", "Overall", "", "Potential", "", "Apps", "Goals", "Assists", "Rating", "XP", "Last"] {
+                ui.label(RichText::new(h).strong());
             }
-        }
+            ui.end_row();
+            for p in players {
+                let was = then.get(&p.id);
+                let position = p.positions.first().map_or(String::new(), |pos| pos.code().to_string());
+                if ui.selectable_label(false, &p.name).clicked() {
+                    state.open = Some(p.id);
+                }
+                ui.label(position);
+                ui.label(age(&p.birth_date, world.year).map_or(String::new(), |a| a.to_string()));
+                ui.label(p.overall.to_string());
+                change_label(ui, was.map(|w| p.overall as i32 - w.overall as i32));
+                ui.label(p.potential.to_string());
+                change_label(ui, was.map(|w| p.potential as i32 - w.potential as i32));
+                let stats = world.season_stats(p.id);
+                for n in [stats.appearances, stats.goals, stats.assists] {
+                    ui.label(n.to_string());
+                }
+                ui.label(stats.average_rating().map_or("-".to_string(), |r| format!("{r:.1}")));
+                xp_bar(ui, p.xp);
+                ui.label(world.last_match_xp.get(&p.id).map_or("-".to_string(), |xp| xp.to_string()));
+                ui.end_row();
+            }
+        });
+    });
+}
+
+/// The XP bar: how far to the next level.
+fn xp_bar(ui: &mut egui::Ui, xp: u16) {
+    ui.add(egui::ProgressBar::new(xp as f32 / XP_PER_LEVEL as f32).desired_width(80.0).text(format!("{xp}/{XP_PER_LEVEL}")));
+}
+
+/// A player's page: who he is, his overall and XP, what he did this season and every attribute with how it changed
+/// since the checkpoint. True when Back is pressed.
+fn player_page(ui: &mut egui::Ui, world: &World, p: &Player, checkpoint: &Checkpoint) -> bool {
+    let then = checkpoint.ratings.get(&p.id);
+    let back = ui.button("Back to the squad").clicked();
+    ui.heading(&p.name);
+    let positions: Vec<&str> = p.positions.iter().map(|pos| pos.code()).collect();
+    ui.label(format!("{}   age {}", positions.join(", "), age(&p.birth_date, world.year).map_or("?".to_string(), |a| a.to_string())));
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Overall");
+        ui.label(RichText::new(p.overall.to_string()).heading());
+        change_label(ui, then.map(|w| p.overall as i32 - w.overall as i32));
+        ui.add_space(16.0);
+        ui.label("Potential");
+        ui.label(RichText::new(p.potential.to_string()).heading());
+        change_label(ui, then.map(|w| p.potential as i32 - w.potential as i32));
+        ui.add_space(16.0);
+        ui.label("XP");
+        xp_bar(ui, p.xp);
+        ui.label(format!("(last match {})", world.last_match_xp.get(&p.id).map_or("-".to_string(), |xp| xp.to_string())));
+    });
+    let stats = world.season_stats(p.id);
+    ui.label(format!(
+        "This season: {} apps, {} goals, {} assists, rating {}, {} XP",
+        stats.appearances,
+        stats.goals,
+        stats.assists,
+        stats.average_rating().map_or("-".to_string(), |r| format!("{r:.1}")),
+        stats.xp
+    ));
+    ui.label(format!("Changes are since the start of {}.", checkpoint.season));
+    ui.separator();
+    let Some(then) = then.map(|w| &w.attrs) else {
+        ui.label("He was not in the squad then, so there is nothing to compare with.");
+        attribute_groups(ui, p, None);
+        return back;
+    };
+    attribute_groups(ui, p, Some(then));
+    back
+}
+
+/// Every attribute the player has, in blocks by category side by side, with its value and, if there is something to
+/// compare with, how it changed. Attributes that changed are coloured; the rest stay grey.
+fn attribute_groups(ui: &mut egui::Ui, player: &Player, then: Option<&Attrs>) {
+    let list = if player.positions.first() == Some(&Position::Gk) { KEEPER } else { OUTFIELD };
+    egui::ScrollArea::vertical().id_salt("player_page").show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for group in list.chunk_by(|a, b| a.category() == b.category()) {
+                ui.vertical(|ui| {
+                    ui.set_min_width(210.0);
+                    ui.label(RichText::new(capitalised(group[0].category())).strong());
+                    egui::Grid::new(("attribute_group", group[0].category())).striped(true).min_col_width(50.0).show(ui, |ui| {
+                        for &attr in group {
+                            ui.label(attr.label());
+                            match player.attrs[attr] {
+                                Some(now) => {
+                                    ui.label(RichText::new(now.to_string()).strong());
+                                    change_label(ui, then.and_then(|t| t[attr]).map(|was| now as i32 - was as i32));
+                                }
+                                None => {
+                                    ui.label("-");
+                                    ui.label("");
+                                }
+                            }
+                            ui.end_row();
+                        }
+                    });
+                });
+                ui.add_space(12.0);
+            }
+        });
     });
 }
 
@@ -114,43 +195,6 @@ fn change_label(ui: &mut egui::Ui, change: Option<i32>) {
         c => (c.to_string(), RED),
     };
     ui.label(RichText::new(text).color(colour));
-}
-
-/// Every attribute the player has, grouped by category, with what it was and what it is now.
-/// Attributes that changed are coloured; the rest stay grey.
-fn attribute_changes(ui: &mut egui::Ui, player: &Player, then: Option<&Attrs>) {
-    ui.label(RichText::new(&player.name).strong());
-    let Some(then) = then else {
-        ui.label("Not in the squad at that time.");
-        return;
-    };
-    let list = if player.positions.first() == Some(&Position::Gk) { KEEPER } else { OUTFIELD };
-    egui::ScrollArea::vertical().id_salt("attribute_changes").show(ui, |ui| {
-        for group in list.chunk_by(|a, b| a.category() == b.category()) {
-            ui.add_space(6.0);
-            ui.label(RichText::new(capitalised(group[0].category())).strong());
-            egui::Grid::new(("attribute_group", group[0].category())).striped(true).min_col_width(60.0).show(ui, |ui| {
-                for &attr in group {
-                    ui.label(attr.label());
-                    match (then[attr], player.attrs[attr]) {
-                        (Some(was), Some(now)) => {
-                            ui.label(format!("{was} -> {now}"));
-                            change_label(ui, Some(now as i32 - was as i32));
-                        }
-                        (None, Some(now)) => {
-                            ui.label(now.to_string()); // the older edition did not rate this
-                            ui.label("");
-                        }
-                        _ => {
-                            ui.label("-");
-                            ui.label("");
-                        }
-                    }
-                    ui.end_row();
-                }
-            });
-        }
-    });
 }
 
 /// "attacking" becomes "Attacking".

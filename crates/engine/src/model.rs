@@ -102,6 +102,9 @@ pub struct Player {
     pub form: u8,
     /// 0-100. Game-only, not in the data.
     pub fitness: u8,
+    /// Experience points toward the next level, added by every match he plays (`development`). Game-only. Only the
+    /// user's club levels up, so the others' bars are not used.
+    pub xp: u16,
 }
 
 pub struct Club {
@@ -214,6 +217,8 @@ pub struct World {
     pub fixtures: Vec<Fixture>,
     /// What each player did, by (player, season start year, competition). Filled as matches with detail are played.
     pub stats: BTreeMap<(PlayerId, u16, CompetitionId), PlayerStats>,
+    /// The experience points each player got in the last match he played.
+    pub last_match_xp: BTreeMap<PlayerId, u8>,
 }
 
 impl World {
@@ -227,6 +232,7 @@ impl World {
             players: BTreeMap::new(),
             fixtures: vec![],
             stats: BTreeMap::new(),
+            last_match_xp: BTreeMap::new(),
         }
     }
 }

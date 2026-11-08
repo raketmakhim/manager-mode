@@ -89,6 +89,7 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
             value: ratings.value,
             form: NEUTRAL_FORM,
             fitness: FULL_FITNESS,
+            xp: 0,
         })
     })?;
     for player in players {

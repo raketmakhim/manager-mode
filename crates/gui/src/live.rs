@@ -3,7 +3,7 @@
 use crate::lineup::short_name;
 use crate::{GREEN, RED};
 use eframe::egui::{self, Color32, ProgressBar, RichText, Vec2};
-use engine::{Event, Formation, Line, LiveMatch, MatchTeam, PlayerId, Rng, Side, SubstitutionError, TacticsError, World};
+use engine::{live_match_stats, Event, Formation, Line, LiveMatch, MatchTeam, PlayerId, PlayerStats, Rng, Side, SubstitutionError, TacticsError, World};
 use std::time::Duration;
 
 /// How long a minute of the match lasts for each speed, in real seconds, and what to call it.
@@ -48,11 +48,13 @@ pub struct State {
     picked: Option<PlayerId>,
     /// Why the last change was refused.
     message: Option<String>,
+    /// What each player earned in the match, worked out once at full time.
+    result: Option<Vec<(PlayerId, PlayerStats)>>,
 }
 
 impl State {
     pub fn new(fixture: usize, live: LiveMatch, side: Side, formation: Formation) -> State {
-        State { fixture, live, side, formation, playing: false, speed: DEFAULT_SPEED, pause_on_goals: true, clock: 0.0, picked: None, message: None }
+        State { fixture, live, side, formation, playing: false, speed: DEFAULT_SPEED, pause_on_goals: true, clock: 0.0, picked: None, message: None, result: None }
     }
 
     /// The fixture and the match, to hand back to the world when the match is done with.
@@ -82,7 +84,13 @@ pub fn ui(ui: &mut egui::Ui, world: &World, s: &mut State, rng: &mut Rng) -> boo
                 stats_ui(ui, home, away, &s.live);
             });
             ui.separator();
-            ui.vertical(|ui| team_ui(ui, world, s));
+            ui.vertical(|ui| {
+                team_ui(ui, world, s);
+                if s.live.is_over() {
+                    ui.add_space(8.0);
+                    xp_ui(ui, world, s);
+                }
+            });
         });
     });
     done
@@ -234,6 +242,27 @@ fn team_ui(ui: &mut egui::Ui, world: &World, s: &mut State) {
     if let Some(message) = &s.message {
         ui.colored_label(RED, message);
     }
+}
+
+/// At full time: what each of your players did and the XP he earned.
+fn xp_ui(ui: &mut egui::Ui, world: &World, s: &mut State) {
+    let f = &world.fixtures[s.fixture];
+    let club = if s.side == Side::Home { f.home } else { f.away };
+    let stats = s.result.get_or_insert_with(|| live_match_stats(&s.live));
+    ui.heading("Match XP");
+    egui::Grid::new("live_xp").striped(true).show(ui, |ui| {
+        for h in ["Player", "Min", "Rating", "XP"] {
+            ui.label(RichText::new(h).strong());
+        }
+        ui.end_row();
+        for (id, st) in stats.iter().filter(|(id, _)| world.players.get(id).is_some_and(|p| p.club == Some(club))) {
+            ui.label(&world.players[id].name);
+            ui.label(st.minutes.to_string());
+            ui.label(st.average_rating().map_or("-".to_string(), |r| format!("{r:.1}")));
+            ui.label(RichText::new(st.xp.to_string()).strong());
+            ui.end_row();
+        }
+    });
 }
 
 /// A player's card; true when it is clicked.

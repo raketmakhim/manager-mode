@@ -19,6 +19,7 @@ pub fn player(id: PlayerId, overall: u8, positions: &[Position]) -> Player {
         value: 0,
         form: 50,
         fitness: 100,
+        xp: 0,
     }
 }
 

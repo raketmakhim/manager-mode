@@ -33,7 +33,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - **Fixture**: competition, round, week, home, away, result
 - **World**: edition, year, competitions, clubs, players, fixtures (the whole game state)
 - Also built: formation per club (ten formations, chosen automatically unless the user sets one), `stats` (per player, season and competition: apps, minutes, goals, assists, shots, saves, conceded, clean sheets, cards)
-- Also built: match ratings (`rating`, a swappable `RatingModel`; average rating and player of the match in the squad and Stats views). Inside the shot-based match model, `ScoringModel` (shooter, goal chance, assister), `DisciplineModel` (fouls and cards), `SubstitutionModel` (changes from the bench, 5 a side by default) and `FatigueModel` (tiring by stamina, position and possession) are swappable the same way. The shot-based match is played a minute at a time (`LiveMatch`); the GUI's "Watch next match" opens it with a clock (real time down to a whole match in 10 s, pause, stops at half time and goals) and lets the user make changes from the bench, swap two players' places and change the formation while it runs
+- Also built: match ratings (`rating`, a swappable `RatingModel`; average rating and player of the match in the squad and Stats views). Inside the shot-based match model, `ScoringModel` (shooter, goal chance, assister), `DisciplineModel` (fouls and cards), `SubstitutionModel` (changes from the bench, 5 a side by default) and `FatigueModel` (tiring by stamina, position and possession) are swappable the same way. The shot-based match is played a minute at a time (`LiveMatch`); the GUI's "Watch next match" opens it with a clock (real time down to a whole match in 10 s, pause, stops at half time and goals) and lets the user make changes from the bench, swap two players' places and change the formation while it runs. Experience (`development`, a swappable `ExperienceModel`): every match gives each player 1 to 10 XP (less for a high overall) into a bar; at 100 XP the user's club's players level up (attributes and overall), softly limited by potential, away from their real careers
 - Still to add: current week, transfer list, the user's club
 
 ## Milestones
@@ -67,7 +67,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - **Done when**: user can buy/sell, and the budget cannot go invalid
 
 ### M5 - Progression and multi-season
-- End-of-season: aging, development toward potential, decline, retirement, new youngsters
+- End-of-season: aging, development toward potential, decline, retirement, new youngsters. Done so far: match XP and levels for the user's club (`development`); not yet: simulated ageing and decline after FC 24, retirement, new youngsters
 - Board objectives and a sack/keep result
 - Save/load (save records which dataset it started from)
 - Historical growth: real ratings as a target curve, simulated growth when diverged

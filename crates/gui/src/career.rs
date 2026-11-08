@@ -7,6 +7,9 @@ use crate::{competitions, fixtures, live, stats, RED};
 use eframe::egui;
 use engine::{advance_ratings, edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, Side, World};
 
+/// How many levelled-up players the line next to the buttons names.
+const MAX_LEVELLED_NAMED: usize = 3;
+
 pub struct Career {
     /// Editions in the database, oldest first.
     editions: Vec<i64>,
@@ -83,6 +86,22 @@ impl Career {
             None => "Nothing left to play.".to_string(),
             Some(index) => Self::result_text(world, index),
         });
+        self.add_level_ups(club);
+    }
+
+    /// Levels up your players whose XP bar is full and adds who to the line next to the buttons.
+    fn add_level_ups(&mut self, club: ClubId) {
+        let Some(world) = &mut self.world else { return };
+        let levelled = world.level_up_club(club, &mut self.rng);
+        if levelled.is_empty() {
+            return;
+        }
+        // After a whole season there can be a dozen: name the first few.
+        let names: Vec<String> = levelled.iter().take(MAX_LEVELLED_NAMED).map(|d| format!("{} {} -> {}", world.players[&d.player].name, d.overall_before, d.overall_after)).collect();
+        let more = levelled.len().saturating_sub(MAX_LEVELLED_NAMED);
+        if let Some(text) = &mut self.last_played {
+            text.push_str(&format!(" Levelled up: {}{}.", names.join(", "), if more > 0 { format!(" and {more} more") } else { String::new() }));
+        }
     }
 
     /// Plays everything before the club's next match and opens that match to watch a minute at a time. A match
@@ -112,6 +131,9 @@ impl Career {
         let (index, live) = state.into_parts();
         world.finish_live_match(index, live, &mut self.rng);
         self.last_played = Some(Self::result_text(world, index));
+        if let Some(club) = self.club {
+            self.add_level_ups(club);
+        }
     }
 
     /// "Home 2-1 Away" for a played fixture.
@@ -126,6 +148,9 @@ impl Career {
         let Some(world) = &mut self.world else { return };
         world.play_season_to_end(&mut self.rng);
         self.last_played = Some("Season finished.".to_string());
+        if let Some(club) = self.club {
+            self.add_level_ups(club);
+        }
     }
 
     /// Promotion and relegation, then the next season's fixtures. Says what happened to your club.

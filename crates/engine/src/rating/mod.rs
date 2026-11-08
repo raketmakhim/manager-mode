@@ -70,6 +70,13 @@ pub fn rate(model: RatingModel, input: &RatingInput) -> Option<f32> {
     Some(rating.clamp(RATING_RANGE.0, RATING_RANGE.1))
 }
 
+/// What a player of this overall and position gets for a drawn 90 minutes in which nothing happens to him: the rating
+/// his season is measured against, so a high overall is not mistaken for a good season.
+pub fn neutral_rating(model: RatingModel, position: Position, overall: u8) -> f32 {
+    let stats = PlayerStats { appearances: 1, minutes: 90, ..PlayerStats::default() };
+    rate(model, &RatingInput { position, overall, minutes: 90, stats: &stats, result: TeamResult::Draw }).unwrap_or(RATING_RANGE.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +94,16 @@ mod tests {
     }
 
     // Rules every model must keep; a new model is added to `RatingModel::ALL` and these run for it too.
+
+    #[test]
+    fn the_neutral_rating_is_what_nothing_happening_in_a_draw_is_worth() {
+        for &model in RatingModel::ALL {
+            for position in [Gk, Cb, Cm, St] {
+                let nothing = rated(model, position, with(|_| {}), TeamResult::Draw);
+                assert_eq!(neutral_rating(model, position, 70), nothing, "{model:?} {position:?}");
+            }
+        }
+    }
 
     #[test]
     fn every_model_stays_in_range_and_rates_nobody_under_ten_minutes() {
