@@ -5,7 +5,8 @@
 //! through `SubstitutionModel::ALL`.
 //!
 //! - `Never`: nobody is replaced (the model before substitutions existed).
-//! - `Planned`: a few changes after the break, mostly forwards and midfielders off, a bench player of the same line on.
+//! - `Planned`: a few changes after the break, mostly forwards and midfielders off and the tired ones first, a bench
+//!   player of the same line on.
 use super::pick::pick;
 use super::{MatchPlayer, MatchTeam};
 use crate::model::Line;
@@ -37,6 +38,9 @@ pub const DEFAULT_SUBSTITUTION_MODEL: SubstitutionModel = SubstitutionModel::Pla
 const ALWAYS_USED: u8 = 3;
 const ALWAYS_USED_CHANCE: f64 = 0.97;
 const EXTRA_USED_CHANCE: f64 = 0.5;
+/// Each point of tiredness (0 to 1) multiplies a player's chance of being taken off by this (as an exponent): a
+/// player at 0.5 is about 1.5 times as likely to go as a fresh one. Our guess; managers change tired legs first.
+const TIRED_PREFERENCE: f64 = 0.8;
 /// A change is made between these minutes of the match, most often around the middle of them.
 const EARLIEST_MINUTE: f64 = 50.0;
 const SPREAD_MINUTES: f64 = 40.0;
@@ -64,17 +68,22 @@ pub(super) struct Change {
     pub bench: usize,
 }
 
-/// The change to make now for `team` as it stands, or `None` if there is nobody to take off or bring on.
-pub(super) fn choose(model: SubstitutionModel, team: &MatchTeam, rng: &mut Rng) -> Option<Change> {
+/// The change to make now for `team` as it stands, with how tired each of its players is (0 to 1, by slot), or `None` if
+/// there is nobody to take off or bring on.
+pub(super) fn choose(model: SubstitutionModel, team: &MatchTeam, tiredness: &[f64; 11], rng: &mut Rng) -> Option<Change> {
     match model {
         SubstitutionModel::Never => None,
         SubstitutionModel::Planned => {
-            let off_weight = |p: &MatchPlayer| match p.position.line() {
-                _ if p.is_empty() => 0.0,
-                Line::Goalkeeper => 0.0,
-                Line::Defence => 0.7,
-                Line::Midfield => 1.2,
-                Line::Attack => 1.6,
+            let off_weight = |p: &MatchPlayer| {
+                let line = match p.position.line() {
+                    _ if p.is_empty() => 0.0,
+                    Line::Goalkeeper => 0.0,
+                    Line::Defence => 0.7,
+                    Line::Midfield => 1.1,
+                    Line::Attack => 1.3,
+                };
+                let slot = team.players.iter().position(|q| q.id == p.id).unwrap_or(0);
+                line * (TIRED_PREFERENCE * tiredness[slot]).exp()
             };
             if team.players.iter().all(|p| off_weight(p) == 0.0) {
                 return None;
@@ -116,7 +125,7 @@ mod tests {
             let team = MatchTeam::flat(70);
             let mut rng = Rng::new(2);
             for _ in 0..500 {
-                if let Some(change) = choose(model, &team, &mut rng) {
+                if let Some(change) = choose(model, &team, &[0.0; 11], &mut rng) {
                     assert!(change.slot != 0, "{model:?}: the keeper came off");
                     assert!(!team.bench[change.bench].is_empty() && team.bench[change.bench].position.line() != Line::Goalkeeper, "{model:?}");
                 }
@@ -129,7 +138,7 @@ mod tests {
         for &model in SubstitutionModel::ALL {
             let mut team = MatchTeam::flat(70);
             team.bench.iter_mut().for_each(|p| p.id = 0);
-            assert!(choose(model, &team, &mut Rng::new(3)).is_none(), "{model:?}");
+            assert!(choose(model, &team, &[0.0; 11], &mut Rng::new(3)).is_none(), "{model:?}");
         }
     }
 
@@ -151,9 +160,20 @@ mod tests {
         let team = MatchTeam::flat(70);
         let mut rng = Rng::new(5);
         for _ in 0..500 {
-            let change = choose(SubstitutionModel::Planned, &team, &mut rng).unwrap();
+            let change = choose(SubstitutionModel::Planned, &team, &[0.0; 11], &mut rng).unwrap();
             // The flat bench has cover for defence, midfield and attack.
             assert_eq!(team.bench[change.bench].position.line(), team.players[change.slot].position.line());
         }
+    }
+
+    #[test]
+    fn the_planned_model_takes_off_the_tired_player_more_often_than_a_fresh_one() {
+        let team = MatchTeam::flat(70);
+        let mut tired = [0.0; 11];
+        tired[8] = 0.8; // one midfielder is spent
+        let mut rng = Rng::new(6);
+        let off = |tiredness: &[f64; 11], rng: &mut Rng| (0..4000).filter(|_| choose(SubstitutionModel::Planned, &team, tiredness, rng).unwrap().slot == 8).count();
+        let (spent, fresh) = (off(&tired, &mut rng), off(&[0.0; 11], &mut rng));
+        assert!(spent as f64 > 1.5 * fresh as f64, "{spent} against {fresh}");
     }
 }

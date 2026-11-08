@@ -33,7 +33,7 @@ pub const DEFAULT_SCORING_MODEL: ScoringModel = ScoringModel::StarWeighted;
 // `research/game-features/simulation-balance.md`. Rerun the simtool after changing any of them.
 
 /// Chance a shot on target is a goal, for a shooter with the reference finishing against a keeper of the reference rating.
-const GOAL_PER_SHOT_ON_TARGET: f64 = 0.296;
+const GOAL_PER_SHOT_ON_TARGET: f64 = 0.303;
 /// The finishing and goalkeeper rating that count as average.
 const REFERENCE_RATING: f64 = 70.0;
 /// Each point of the shooter's finishing above the reference changes that chance by this share (exponent), within
@@ -140,7 +140,7 @@ mod tests {
     fn every_model_picks_a_filled_outfield_slot_to_shoot_and_never_the_scorer_to_assist() {
         for &model in ScoringModel::ALL {
             let mut team = MatchTeam::flat(70);
-            team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0, aggression: 0 };
+            team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0, aggression: 0, stamina: 0 };
             let mut rng = Rng::new(2);
             for _ in 0..2000 {
                 let slot = shooter(model, &team.players, &mut rng);

@@ -2,17 +2,19 @@
 //! `MatchReport`, and `simulate` picks one by `MatchModel`. A competition's `Rules` say which model its matches use.
 //!
 //! - `cheap`: team strength to a score (Poisson goals with a Dixon-Coles correction). No events.
-//! - `shot_based`: a timeline of shots, saves, goals, fouls, cards and corners, with possession. Events and detail.
+//! - `shot_based`: a match played minute by minute: shots, saves, goals, fouls, cards and corners, with possession. Events and detail.
+//!   `LiveMatch` is the same match advanced a minute at a time, so the user can make substitutions in between.
 //!
 //! The report always has the score. A model that plays the match out also returns its events as `detail`; stats and
 //! match ratings are worked out from those events, so any model that emits the events they need works with them.
 //! Adding a model: a new file, a `MatchModel` variant and an arm in `simulate`; the compiler lists the rest.
 //!
 //! Inside the shot-based model, two parts are models of their own, swapped the same way (a variant and an arm; the
-//! contract tests run through `ALL`): `scoring` (who shoots, scores and assists) and `discipline` (who fouls and is
-//! carded) and `substitution` (when changes are made, who goes off and who comes on). Player match ratings are a third, in `rating`.
+//! contract tests run through `ALL`): `scoring` (who shoots, scores and assists), `discipline` (who fouls and is
+//! carded) and `fatigue` (how tired players get) and `substitution` (when changes are made, who goes off and who comes on). Player match ratings are a third, in `rating`.
 mod cheap;
 mod discipline;
+mod fatigue;
 mod pick;
 mod scoring;
 mod shot_based;
@@ -20,9 +22,10 @@ mod substitution;
 
 pub use cheap::team_strength;
 pub use discipline::DisciplineModel;
+pub use fatigue::FatigueModel;
 pub use scoring::ScoringModel;
 pub use substitution::SubstitutionModel;
-pub use shot_based::{simulate_with as simulate_shot_based, Parts as ShotBasedParts, DEFAULT_PARTS as DEFAULT_SHOT_BASED_PARTS};
+pub use shot_based::{simulate_with as simulate_shot_based, LiveMatch, Parts as ShotBasedParts, SubstitutionError, DEFAULT_PARTS as DEFAULT_SHOT_BASED_PARTS};
 
 use crate::lineup::BENCH_SIZE;
 use crate::model::{PlayerId, Position};
@@ -57,6 +60,8 @@ pub struct MatchPlayer {
     pub creativity: u8,
     /// How hard he plays, 0-99: decides how often he fouls.
     pub aggression: u8,
+    /// How long he keeps running, 0-99: decides how fast he tires.
+    pub stamina: u8,
 }
 
 /// The aggression of a player whose data lacks the attribute: about the mean outfield player.
@@ -91,9 +96,9 @@ impl MatchTeam {
     pub(crate) fn flat(rating: u8) -> MatchTeam {
         use crate::lineup::Formation;
         let slots = Formation::FourFourTwo.slots();
-        let player = |id: PlayerId, position| MatchPlayer { id, position, rating, finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION };
+        let player = |id: PlayerId, position| MatchPlayer { id, position, rating, finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION, stamina: rating };
         let bench_positions = [Position::Gk, Position::Cb, Position::Rb, Position::Cm, Position::Cam, Position::Lw, Position::St];
-        MatchTeam { players: std::array::from_fn(|i| player(i as PlayerId, slots[i])), bench: std::array::from_fn(|i| player(100 + i as PlayerId, bench_positions[i])) }
+        MatchTeam { players: std::array::from_fn(|i| player(i as PlayerId + 1, slots[i])), bench: std::array::from_fn(|i| player(100 + i as PlayerId, bench_positions[i])) }
     }
 }
 

@@ -4,7 +4,7 @@ use super::Competition;
 use crate::lineup::{rating_at, Selection};
 use crate::model::{ClubId, Player, Position, World};
 use crate::rng::Rng;
-use crate::sim::{simulate, MatchInput, MatchPlayer, MatchTeam, AVERAGE_AGGRESSION};
+use crate::sim::{simulate, LiveMatch, MatchInput, MatchModel, MatchPlayer, MatchReport, MatchTeam, AVERAGE_AGGRESSION, DEFAULT_SHOT_BASED_PARTS};
 
 impl World {
     /// Plays the fixture at `index` in `fixtures` with its competition's match model and stores the result. Cup ties
@@ -15,11 +15,16 @@ impl World {
     // matches that matter (the user's club, finals) once something shows them.
     pub fn play_fixture(&mut self, index: usize, rng: &mut Rng) {
         let f = &self.fixtures[index];
-        let (id, competition) = (f.competition, &self.competitions[&f.competition]);
+        let competition = &self.competitions[&f.competition];
         let input = self.match_input(f.home, f.away, competition);
         let report = simulate(competition.rules.model, &input, rng);
+        self.store_report(index, report);
+    }
+
+    /// Stores a played match's result and adds its events to the player stats.
+    fn store_report(&mut self, index: usize, report: MatchReport) {
         if let Some(detail) = &report.detail {
-            self.record_match(id, detail, &report.outcome);
+            self.record_match(self.fixtures[index].competition, detail, &report.outcome);
         }
         self.fixtures[index].result = Some(report.outcome);
     }
@@ -45,6 +50,16 @@ impl World {
     /// match and the other clubs' matches of its week. If the club has a second match that week it stays unplayed
     /// for the next call. Returns the played fixture's index, or `None` if the club has nothing left to play.
     pub fn play_next_match(&mut self, club: ClubId, rng: &mut Rng) -> Option<usize> {
+        let next = self.play_up_to_next_match(club, rng)?;
+        self.play_fixture(next, rng);
+        self.advance_cups(rng);
+        Some(next)
+    }
+
+    /// Plays everything before the club's next unplayed match, the other clubs' matches of its week included, but not
+    /// the match itself, which the caller plays with `play_fixture` or live (`start_live_match`). Returns its index,
+    /// or `None` if the club has nothing left to play. Cup rounds are drawn when the caller calls `advance_cups`.
+    pub fn play_up_to_next_match(&mut self, club: ClubId, rng: &mut Rng) -> Option<usize> {
         let next = (0..self.fixtures.len())
             .filter(|&i| self.fixtures[i].result.is_none() && self.fixtures[i].involves(club))
             .min_by_key(|&i| (self.fixtures[i].week, self.fixtures[i].day))?;
@@ -55,12 +70,26 @@ impl World {
         }
         for i in 0..self.fixtures.len() {
             let f = &self.fixtures[i];
-            if f.week == week && f.result.is_none() && (i == next || !f.involves(club)) {
+            if f.week == week && f.result.is_none() && !f.involves(club) {
                 self.play_fixture(i, rng);
             }
         }
-        self.advance_cups(rng);
         Some(next)
+    }
+
+    /// The fixture at `index` ready to be played a minute at a time, with `club`'s changes made by the user. `None`
+    /// if the competition's match model cannot be played that way.
+    pub fn start_live_match(&self, index: usize, club: ClubId, rng: &mut Rng) -> Option<LiveMatch> {
+        let f = &self.fixtures[index];
+        let competition = &self.competitions[&f.competition];
+        (competition.rules.model == MatchModel::ShotBased).then(|| LiveMatch::new(&self.match_input(f.home, f.away, competition), DEFAULT_SHOT_BASED_PARTS, [f.home == club, f.away == club], rng))
+    }
+
+    /// Plays out whatever is left of a live match, stores its result and draws any cup round that this completes.
+    pub fn finish_live_match(&mut self, index: usize, live: LiveMatch, rng: &mut Rng) {
+        let report = live.into_report(rng);
+        self.store_report(index, report);
+        self.advance_cups(rng);
     }
 
     /// What a match model needs to know about the two clubs: their lineups, each player rated in his slot.
@@ -72,7 +101,7 @@ impl World {
     fn match_team(&self, club: ClubId) -> MatchTeam {
         let slots = self.clubs[&club].formation.slots();
         let Selection { lineup, bench } = self.selection_of(club);
-        let empty = |position| MatchPlayer { id: 0, position, rating: 0, finishing: 0, creativity: 0, aggression: 0 };
+        let empty = |position| MatchPlayer { id: 0, position, rating: 0, finishing: 0, creativity: 0, aggression: 0, stamina: 0 };
         let players = std::array::from_fn(|i| match lineup[i] {
             Some(id) => match_player(&self.players[&id], slots[i]),
             None => empty(slots[i]),
@@ -97,6 +126,7 @@ fn match_player(player: &Player, slot: Position) -> MatchPlayer {
         finishing: attr(Attr::Finishing),
         creativity: creativity(attr(Attr::Vision), attr(Attr::ShortPassing), attr(Attr::LongPassing), attr(Attr::Crossing), attr(Attr::Dribbling)),
         aggression: player.attrs[Attr::Aggression].unwrap_or(AVERAGE_AGGRESSION),
+        stamina: attr(Attr::Stamina),
     }
 }
 
@@ -193,6 +223,46 @@ mod tests {
         assert!(stats.iter().all(|(_, s)| s.appearances <= 14 && s.minutes <= 14 * 90));
         // The minutes of a club's players cannot exceed eleven players for the whole of every match.
         assert!(stats.iter().map(|(_, s)| s.minutes as u32).sum::<u32>() <= 11 * 90 * 14 * 8);
+    }
+
+    #[test]
+    fn a_live_match_can_be_changed_by_the_user_and_is_stored_with_its_stats() {
+        use crate::outcome::Side;
+        use crate::testing::player;
+        let mut w = world(8);
+        // Three extra players in club 1: a back-up keeper, a midfielder and a striker for the bench.
+        for (i, position) in [Position::Gk, Position::Cm, Position::St].into_iter().enumerate() {
+            let mut p = player(111 + i as u32, 60, &[position]);
+            p.club = Some(1);
+            w.clubs.get_mut(&1).unwrap().squad.push(p.id);
+            w.players.insert(p.id, p);
+        }
+        let mut rng = Rng::new(3);
+        let index = w.play_up_to_next_match(1, &mut rng).unwrap();
+        assert!(w.fixtures[index].result.is_none(), "the match itself is left for the caller");
+        let mut live = w.start_live_match(index, 1, &mut rng).unwrap();
+        for _ in 0..60 {
+            live.advance(&mut rng);
+        }
+        let side = if w.fixtures[index].home == 1 { Side::Home } else { Side::Away };
+        let off = live.team(side).players[10].id;
+        let on = live.team(side).bench.iter().find(|p| p.position == Position::St).expect("the striker is on the bench").id;
+        live.substitute(side, off, on).unwrap();
+        w.finish_live_match(index, live, &mut rng);
+        assert!(w.fixtures[index].result.is_some());
+        let stats = w.stats_for(Some(w.year), Some(1));
+        let of = |id| stats.iter().find(|(p, _)| *p == id).map(|(_, s)| *s).unwrap();
+        assert_eq!((of(on).appearances, of(on).minutes), (1, 30), "the substitute played from the 60th minute");
+        assert_eq!(of(off).minutes, 60);
+    }
+
+    #[test]
+    fn a_match_of_the_cheap_model_cannot_be_played_live() {
+        let mut w = world(8);
+        w.competitions.get_mut(&1).unwrap().rules.model = MatchModel::Cheap;
+        let mut rng = Rng::new(1);
+        let index = w.play_up_to_next_match(1, &mut rng).unwrap();
+        assert!(w.start_live_match(index, 1, &mut rng).is_none());
     }
 
     #[test]

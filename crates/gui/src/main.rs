@@ -4,6 +4,7 @@ mod career;
 mod competitions;
 mod fixtures;
 mod leagues;
+mod live;
 mod lineup;
 mod scout;
 mod squad;

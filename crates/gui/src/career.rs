@@ -1,10 +1,11 @@
-//! Career tab: start a new career (pick a year, a league and a club), then see that club's fixtures and dates.
+//! Career tab: start a new career (pick a year, a league and a club), then see that club's fixtures and dates, play its
+//! matches at once or watch them a minute at a time (`live`).
 use crate::leagues::{league_label, sorted_leagues};
 use crate::squad::{self, Checkpoint};
 use crate::lineup;
-use crate::{competitions, fixtures, stats, RED};
+use crate::{competitions, fixtures, live, stats, RED};
 use eframe::egui;
-use engine::{advance_ratings, edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, World};
+use engine::{advance_ratings, edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, Side, World};
 
 pub struct Career {
     /// Editions in the database, oldest first.
@@ -25,6 +26,8 @@ pub struct Career {
     squad: squad::State,
     lineup: lineup::State,
     stats: stats::State,
+    /// Your match while it is being watched; the rest of the screen waits.
+    live: Option<live::State>,
     /// Seeded when the career starts; every simulated match draws from it.
     rng: Rng,
     /// The result of the last match you played, for the line next to the button.
@@ -35,7 +38,7 @@ pub struct Career {
 impl Career {
     pub fn new(conn: &Connection) -> Self {
         let editions = editions(conn).unwrap_or_default();
-        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, checkpoints: vec![], squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), rng: Rng::new(0), last_played: None, error: None }
+        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, checkpoints: vec![], squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), live: None, rng: Rng::new(0), last_played: None, error: None }
     }
 
     /// Loads the picked edition and selects the first league and club.
@@ -69,6 +72,7 @@ impl Career {
         self.checkpoints = vec![Checkpoint::of_squad(world, club, season_name(world.year))];
         self.squad = squad::State::default();
         self.lineup = lineup::State::default();
+        self.live = None;
         self.started = true;
     }
 
@@ -77,12 +81,44 @@ impl Career {
         let Some(world) = &mut self.world else { return };
         self.last_played = Some(match world.play_next_match(club, &mut self.rng) {
             None => "Nothing left to play.".to_string(),
-            Some(index) => {
-                let f = &world.fixtures[index];
-                let result = f.result.map_or(String::new(), |o| o.to_string());
-                format!("{} {} {}", world.clubs[&f.home].name, result, world.clubs[&f.away].name)
-            }
+            Some(index) => Self::result_text(world, index),
         });
+    }
+
+    /// Plays everything before the club's next match and opens that match to watch a minute at a time. A match
+    /// that cannot be watched (a competition on the cheap model) is just played.
+    fn watch_next_match(&mut self, club: ClubId) {
+        let Some(world) = &mut self.world else { return };
+        let Some(index) = world.play_up_to_next_match(club, &mut self.rng) else {
+            self.last_played = Some("Nothing left to play.".to_string());
+            return;
+        };
+        match world.start_live_match(index, club, &mut self.rng) {
+            Some(live) => {
+                let side = if world.fixtures[index].home == club { Side::Home } else { Side::Away };
+                self.live = Some(live::State::new(index, live, side));
+            }
+            None => {
+                world.play_fixture(index, &mut self.rng);
+                world.advance_cups(&mut self.rng);
+                self.last_played = Some(Self::result_text(world, index));
+            }
+        }
+    }
+
+    /// The match you watched is over: store its result and go back to the season.
+    fn finish_watching(&mut self) {
+        let (Some(world), Some(state)) = (&mut self.world, self.live.take()) else { return };
+        let (index, live) = state.into_parts();
+        world.finish_live_match(index, live, &mut self.rng);
+        self.last_played = Some(Self::result_text(world, index));
+    }
+
+    /// "Home 2-1 Away" for a played fixture.
+    fn result_text(world: &World, index: usize) -> String {
+        let f = &world.fixtures[index];
+        let result = f.result.map_or(String::new(), |o| o.to_string());
+        format!("{} {} {}", world.clubs[&f.home].name, result, world.clubs[&f.away].name)
     }
 
     /// Simulates every match that is left in the season, for all clubs.
@@ -183,6 +219,12 @@ impl Career {
 
     fn season_ui(&mut self, ui: &mut egui::Ui, conn: &Connection) {
         let (Some(club_id), Some(world)) = (self.club, &self.world) else { return };
+        if let Some(state) = &mut self.live {
+            if live::ui(ui, world, state, &mut self.rng) {
+                self.finish_watching();
+            }
+            return;
+        }
         let (club, league) = (&world.clubs[&club_id], &world.competitions[&world.clubs[&club_id].league]);
         let title = format!("{} · season {}", league_label(league), season_name(world.year));
         ui.horizontal(|ui| {
@@ -191,6 +233,9 @@ impl Career {
         });
         ui.horizontal(|ui| {
             let finished = self.world.as_ref().is_some_and(|w| w.season_finished());
+            if ui.add_enabled(!finished, egui::Button::new("Watch next match")).clicked() {
+                self.watch_next_match(club_id);
+            }
             if ui.add_enabled(!finished, egui::Button::new("Play next match")).clicked() {
                 self.play_next_match(club_id);
             }
@@ -266,5 +311,23 @@ mod tests {
         let name = world.clubs[&club].name.clone();
         c.play_next_match(club);
         assert!(c.last_played.as_deref().is_some_and(|t| t.contains(&name)));
+    }
+
+    #[test]
+    fn a_match_can_be_watched_and_its_result_is_stored_when_it_is_over() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../history.db");
+        if !std::path::Path::new(path).exists() { return; }
+        let conn = Connection::open(path).unwrap();
+        let mut c = Career::new(&conn);
+        c.load(&conn);
+        c.start();
+        let club = c.club.unwrap();
+        c.watch_next_match(club);
+        assert!(c.live.is_some(), "the next match opens to be watched");
+        c.finish_watching();
+        assert!(c.live.is_none());
+        let name = c.world.as_ref().unwrap().clubs[&club].name.clone();
+        assert!(c.last_played.as_deref().is_some_and(|t| t.contains(&name)));
+        assert!(c.world.as_ref().unwrap().fixtures.iter().any(|f| f.involves(club) && f.result.is_some()));
     }
 }

@@ -9,7 +9,7 @@
 //! - `overall`: how overall is built from attributes, by position (weights; `overall_change`).
 //! - `rating`: player match ratings behind one function, `rate` (a swappable `RatingModel`).
 //! - `rng`: the seeded random number generator every simulation takes.
-//! - `sim`: the match models behind one function, `simulate`: cheap (team strength to a score) and shot-based (shots, saves, goals, cards, corners, possession). Inside the shot-based model, who shoots, scores and assists (`ScoringModel`) who fouls and is carded (`DisciplineModel`) and who is substituted when (`SubstitutionModel`) are swappable models of their own.
+//! - `sim`: the match models behind one function, `simulate`: cheap (team strength to a score) and shot-based (shots, saves, goals, cards, corners, possession). Inside the shot-based model, who shoots, scores and assists (`ScoringModel`), who fouls and is carded (`DisciplineModel`), who is substituted when (`SubstitutionModel`) and how tired players get (`FatigueModel`) are swappable models of their own. A `LiveMatch` plays the shot-based model a minute at a time so the user can change a side in between.
 //! - `source`: building a `World` from history.db.
 //! - `stats`: what each player did, added up from the events of the matches played.
 mod attrs;
@@ -44,7 +44,7 @@ pub use outcome::{Outcome, Side};
 pub use rating::RatingModel;
 pub use overall::{overall_change, weights};
 pub use rng::Rng;
-pub use sim::{simulate, simulate_shot_based, team_strength, DisciplineModel, SubstitutionModel, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS, Event, MatchDetail, MatchInput, MatchModel, MatchReport, MatchTeam, ScoringModel};
+pub use sim::{simulate, simulate_shot_based, team_strength, DisciplineModel, FatigueModel, LiveMatch, SubstitutionError, SubstitutionModel, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS, Event, MatchDetail, MatchInput, MatchModel, MatchPlayer, MatchReport, MatchTeam, ScoringModel};
 pub use rusqlite::Connection;
 pub use source::{advance_ratings, editions, load_edition};
 pub use stats::PlayerStats;
