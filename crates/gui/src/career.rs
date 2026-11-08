@@ -1,11 +1,11 @@
 //! Career tab: start a new career (pick a year, a league and a club), then see that club's fixtures and dates, play its
 //! matches at once or watch them a minute at a time (`live`).
 use crate::leagues::{league_label, sorted_leagues};
-use crate::squad::{self, Checkpoint};
+use crate::squad::{self, History};
 use crate::lineup;
-use crate::{competitions, fixtures, live, stats, RED};
+use crate::{competitions, fixtures, live, stats, transfers, RED};
 use eframe::egui;
-use engine::{advance_ratings, edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, Side, World};
+use engine::{advance_ratings, edition_label, editions, load_edition, plan_transfers, season_label, season_name, ClubId, CompetitionId, Connection, Rng, Side, Window, World};
 
 /// How many levelled-up players the line next to the buttons names.
 const MAX_LEVELLED_NAMED: usize = 3;
@@ -24,13 +24,15 @@ pub struct Career {
     view: View,
     /// The competition shown in the Competitions view; `None` means your own league.
     competition: Option<CompetitionId>,
-    /// Your squad's ratings at the start of each season so far, for the squad view.
-    checkpoints: Vec<Checkpoint>,
+    /// Your squad's overall at the start of each season so far, and its ratings at the start of this one, for the squad view.
+    history: Option<History>,
     squad: squad::State,
     lineup: lineup::State,
     stats: stats::State,
     /// Your match while it is being watched; the rest of the screen waits.
     live: Option<live::State>,
+    /// The summer's transfers while you decide on the ones that involve your club; the season waits.
+    window: Option<Window>,
     /// Seeded when the career starts; every simulated match draws from it.
     rng: Rng,
     /// The result of the last match you played, for the line next to the button.
@@ -41,7 +43,7 @@ pub struct Career {
 impl Career {
     pub fn new(conn: &Connection) -> Self {
         let editions = editions(conn).unwrap_or_default();
-        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, checkpoints: vec![], squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), live: None, rng: Rng::new(0), last_played: None, error: None }
+        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, history: None, squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), live: None, window: None, rng: Rng::new(0), last_played: None, error: None }
     }
 
     /// Loads the picked edition and selects the first league and club.
@@ -72,10 +74,11 @@ impl Career {
         self.competition = None;
         self.view = View::Fixtures;
         world.start_season(&mut self.rng);
-        self.checkpoints = vec![Checkpoint::of_squad(world, club, season_name(world.year))];
+        self.history = Some(History::new(world, club, season_name(world.year)));
         self.squad = squad::State::default();
         self.lineup = lineup::State::default();
         self.live = None;
+        self.window = None;
         self.started = true;
     }
 
@@ -153,16 +156,32 @@ impl Career {
         }
     }
 
-    /// Promotion and relegation, then the next season's fixtures. Says what happened to your club.
-    fn start_next_season(&mut self, club: ClubId, conn: &Connection) {
+    /// The end of the season: plans the summer's transfers and, if some involve your club, waits for your answers
+    /// (`transfers::ui`) before starting the next season.
+    fn begin_next_season(&mut self, club: ClubId, conn: &Connection) {
+        let Some(world) = &self.world else { return };
+        match plan_transfers(conn, world, Some(club)) {
+            Ok(window) if !window.questions_for(club).is_empty() => self.window = Some(window),
+            Ok(window) => self.start_next_season(club, window, conn),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Makes the transfers, then promotion and relegation and the next season's fixtures. Says what happened to your
+    /// club.
+    fn start_next_season(&mut self, club: ClubId, window: Window, conn: &Connection) {
         let Some(world) = &mut self.world else { return };
         let Some(moves) = world.start_next_season(&mut self.rng) else { return };
+        let deals = (window.transfers().len(), window.questions_for(club).iter().filter(|&&i| !window.is_declined(i)).count());
+        world.make_transfers(window);
         let ratings = match advance_ratings(conn, world) {
             Ok(true) => "Player ratings updated to the real new season.",
             Ok(false) => "No newer data: player ratings are unchanged.",
             Err(_) => "Could not read the new ratings.",
         };
-        self.checkpoints.push(Checkpoint::of_squad(world, club, season_name(world.year)));
+        if let Some(history) = &mut self.history {
+            history.start_season(world, club, season_name(world.year));
+        }
         let mine = moves.iter().find(|m| m.club == club);
         let text = match mine {
             Some(m) => {
@@ -171,7 +190,7 @@ impl Career {
             }
             _ => "Your club stays in its division.".to_string(),
         };
-        self.last_played = Some(format!("{} clubs changed division. {text} {ratings}", moves.len()));
+        self.last_played = Some(format!("{} clubs changed division. {text} {} transfers, {} of them yours. {ratings}", moves.len(), deals.0, deals.1));
         self.competition = None;
     }
 
@@ -268,7 +287,7 @@ impl Career {
                 self.finish_season();
             }
             if ui.add_enabled(finished, egui::Button::new("Start next season")).clicked() {
-                self.start_next_season(club_id, conn);
+                self.begin_next_season(club_id, conn);
             }
             if ui.button("New career").clicked() {
                 self.started = false;
@@ -280,6 +299,14 @@ impl Career {
         });
         let Some(world) = &self.world else { return };
         ui.separator();
+        if let Some(window) = &mut self.window {
+            if transfers::ui(ui, world, club_id, window) {
+                if let Some(window) = self.window.take() {
+                    self.start_next_season(club_id, window, conn);
+                }
+            }
+            return;
+        }
 
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.view, View::Fixtures, "My fixtures");
@@ -291,7 +318,11 @@ impl Career {
         ui.add_space(6.0);
         match self.view {
             View::Fixtures => fixtures::ui(ui, world, club_id),
-            View::Squad => squad::ui(ui, world, club_id, &self.checkpoints, &mut self.squad),
+            View::Squad => {
+                if let Some(history) = &self.history {
+                    squad::ui(ui, world, club_id, history, &mut self.squad);
+                }
+            }
             View::Lineup => {
                 if let Some(world) = &mut self.world {
                     lineup::ui(ui, world, club_id, &mut self.lineup);
@@ -336,6 +367,33 @@ mod tests {
         let name = world.clubs[&club].name.clone();
         c.play_next_match(club);
         assert!(c.last_played.as_deref().is_some_and(|t| t.contains(&name)));
+    }
+
+    #[test]
+    fn the_next_season_waits_for_your_answers_on_deals_and_a_declined_deal_keeps_the_player() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../history.db");
+        if !std::path::Path::new(path).exists() { return; }
+        let conn = Connection::open(path).unwrap();
+        let mut c = Career::new(&conn);
+        c.load(&conn);
+        c.start();
+        let club = c.club.unwrap();
+        c.finish_season();
+        c.begin_next_season(club, &conn);
+        let mut window = c.window.take().expect("the first club has deals in its first summer");
+        let asked = window.questions_for(club);
+        let kept = window.transfers()[asked[0]].player;
+        let (sells, from) = (window.transfers()[asked[0]].from == Some(club), window.transfers()[asked[0]].from);
+        window.set_declined(asked[0], true);
+        c.start_next_season(club, window, &conn);
+        let world = c.world.as_ref().unwrap();
+        assert_eq!(world.edition, 16);
+        if sells {
+            assert_eq!(world.players[&kept].club, from, "the player you refused to sell is still yours");
+        } else {
+            assert_ne!(world.players[&kept].club, Some(club), "the player you refused to sign did not arrive");
+        }
+        assert!(world.calendar_problems().is_empty());
     }
 
     #[test]

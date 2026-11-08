@@ -129,11 +129,23 @@ fn formula_at(player: &Player, position: Position) -> Option<f32> {
     weights(position).iter().map(|&(attr, weight)| Some(weight * player.attrs[attr]? as f32)).sum()
 }
 
-/// A player's rating when he plays `slot` (0 to 99). At his main position it is his overall. At another position
-/// it is his overall plus the difference between that position's formula and his main position's, worked out from
-/// his own attributes, minus a small penalty if the position is not one he is listed for.
+/// The listed position his overall belongs to: the one whose formula gives the most for his attributes (the first
+/// listed on a tie or when attributes are missing). The data's overall is for his best position, which is not always
+/// the first listed.
+fn overall_position(player: &Player) -> Option<Position> {
+    let first = *player.positions.first()?;
+    let best = player.positions.iter().filter_map(|&pos| Some((pos, formula_at(player, pos)?))).fold(None, |best: Option<(Position, f32)>, now| match best {
+        Some(b) if b.1 >= now.1 => Some(b),
+        _ => Some(now),
+    });
+    Some(best.map_or(first, |(pos, _)| pos))
+}
+
+/// A player's rating when he plays `slot` (0 to 99). At the position his overall belongs to (`overall_position`) it is
+/// his overall. At another position it is his overall plus the difference between that position's formula and his
+/// own position's, worked out from his own attributes, minus a small penalty if the position is not one he is listed for.
 pub fn rating_at(player: &Player, slot: Position) -> u8 {
-    let Some(&main) = player.positions.first() else {
+    let Some(main) = overall_position(player) else {
         return player.overall.saturating_sub(if slot == Position::Gk { KEEPER_MISMATCH_PENALTY } else { OTHER_LINE_PENALTY });
     };
     if (slot == Position::Gk) != (main == Position::Gk) {
@@ -357,6 +369,15 @@ mod tests {
             assert_eq!(slots[0], Gk, "{}", f.name());
             assert_eq!(slots.iter().filter(|&&p| p == Gk).count(), 1, "{}", f.name());
         }
+    }
+
+    #[test]
+    fn a_player_listed_first_at_a_position_that_does_not_fit_his_attributes_is_not_inflated_at_his_best_one() {
+        // Listed RM first, but his attributes are a full-back's: the data's overall belongs to RB.
+        let tackler = [(Attr::Marking, 85), (Attr::StandingTackle, 85), (Attr::SlidingTackle, 85), (Attr::Interceptions, 85), (Attr::Finishing, 30)];
+        let p = player_with_attrs(1, 81, &[Rm, Rb], &tackler);
+        assert_eq!(rating_at(&p, Rb), 81, "at the position his overall belongs to he is worth his overall");
+        assert!(rating_at(&p, Rm) < 81);
     }
 
     #[test]

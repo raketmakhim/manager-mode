@@ -5,6 +5,7 @@ use crate::attrs::{follow_real_change, Attr, Attrs};
 use crate::competition::{Competition, Rules};
 use crate::lineup::{Formation, Selection};
 use crate::model::*;
+use crate::transfer::{real_transfers, Membership, Window};
 use rusqlite::{Connection, Result};
 use std::collections::HashMap;
 
@@ -63,35 +64,8 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
         world.clubs.insert(club.id, club);
     }
 
-    let sql = format!(
-        "SELECT r.player_id AS id, p.long_name AS name, p.dob AS dob, r.player_positions AS positions,
-                r.club_team_id AS club, {}
-         FROM ratings r JOIN players p USING (player_id)
-         WHERE r.fifa_version = ?1
-         ORDER BY r.overall DESC, r.player_id",
-        Ratings::select_list()
-    );
-    let mut st = conn.prepare(&sql)?;
-    let players = st.query_map([version], |r| {
-        let positions: Option<String> = r.get("positions")?;
-        let ratings = Ratings::from_row(r)?;
-        Ok(Player {
-            id: r.get("id")?,
-            name: r.get("name")?,
-            birth_date: r.get("dob")?,
-            positions: positions.unwrap_or_default().split(',').filter_map(|p| Position::parse(p.trim())).collect(),
-            attrs: ratings.attrs,
-            overall: ratings.overall,
-            potential: ratings.potential,
-            club: r.get("club")?,
-            wage: ratings.wage,
-            contract_until: ratings.contract_until,
-            value: ratings.value,
-            form: NEUTRAL_FORM,
-            fitness: FULL_FITNESS,
-            xp: 0,
-        })
-    })?;
+    let mut st = conn.prepare(&players_sql("r.fifa_version = ?1"))?;
+    let players = st.query_map([version], player_from_row)?;
     for player in players {
         let player = player?;
         if let Some(club) = player.club.and_then(|c| world.clubs.get_mut(&c)) {
@@ -102,6 +76,39 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
     Ok(world)
 }
 
+/// The query for players of the `ratings` rows that match `filter`, best first. Pairs with `player_from_row`.
+fn players_sql(filter: &str) -> String {
+    format!(
+        "SELECT r.player_id AS id, p.long_name AS name, p.dob AS dob,
+                r.club_team_id AS club, {}
+         FROM ratings r JOIN players p USING (player_id)
+         WHERE {filter}
+         ORDER BY r.overall DESC, r.player_id",
+        Ratings::select_list()
+    )
+}
+
+/// Reads one row of `players_sql` as a new player: no XP, normal form and fitness.
+fn player_from_row(r: &rusqlite::Row) -> Result<Player> {
+    let ratings = Ratings::from_row(r)?;
+    Ok(Player {
+        id: r.get("id")?,
+        name: r.get("name")?,
+        birth_date: r.get("dob")?,
+        positions: ratings.positions,
+        attrs: ratings.attrs,
+        overall: ratings.overall,
+        potential: ratings.potential,
+        club: r.get("club")?,
+        wage: ratings.wage,
+        contract_until: ratings.contract_until,
+        value: ratings.value,
+        form: NEUTRAL_FORM,
+        fitness: FULL_FITNESS,
+        xp: 0,
+    })
+}
+
 /// One player's real ratings in one edition: the part of a `ratings` row that changes from year to year.
 struct Ratings {
     overall: u8,
@@ -109,6 +116,7 @@ struct Ratings {
     wage: u32,
     value: u32,
     contract_until: Option<u16>,
+    positions: Vec<Position>,
     attrs: Attrs,
 }
 
@@ -117,7 +125,7 @@ impl Ratings {
     fn select_list() -> String {
         format!(
             "r.overall AS overall, r.potential AS potential, r.wage_eur AS wage, r.value_eur AS value,
-             r.club_contract_valid_until_year AS contract_until, {}",
+             r.club_contract_valid_until_year AS contract_until, r.player_positions AS positions, {}",
             Attr::select_list()
         )
     }
@@ -130,6 +138,7 @@ impl Ratings {
             wage: r.get::<_, Option<u32>>("wage")?.unwrap_or(0),
             value: r.get::<_, Option<u32>>("value")?.unwrap_or(0),
             contract_until: r.get("contract_until")?,
+            positions: r.get::<_, Option<String>>("positions")?.unwrap_or_default().split(',').filter_map(|p| Position::parse(p.trim())).collect(),
             attrs: Attrs::from_row(r)?,
         })
     }
@@ -143,11 +152,36 @@ fn read_ratings(conn: &Connection, version: i64) -> Result<HashMap<PlayerId, Rat
     rows.collect()
 }
 
+/// The summer's transfers, from how the real clubs of the players changed between this edition and the next: who
+/// moved, who left the game and who is new (with his real ratings). `user` is the user's club, whose players are
+/// never taken out of the game. Empty when there is no next edition. Make them with `World::make_transfers`, before
+/// `advance_ratings`.
+pub fn plan_transfers(conn: &Connection, world: &World, user: Option<ClubId>) -> Result<Window> {
+    let next = world.edition + 1;
+    if !editions(conn)?.contains(&next) {
+        return Ok(Window::new(world, vec![], vec![], user));
+    }
+    let transfers = real_transfers(&read_memberships(conn, world.edition)?, &read_memberships(conn, next)?);
+    let mut st = conn.prepare(&players_sql("r.fifa_version = ?2 AND r.player_id NOT IN (SELECT player_id FROM ratings WHERE fifa_version = ?1)"))?;
+    let newcomers = st.query_map([world.edition, next], player_from_row)?.collect::<Result<Vec<_>>>()?;
+    Ok(Window::new(world, transfers, newcomers, user))
+}
+
+/// Every player's club in one edition, by player id.
+fn read_memberships(conn: &Connection, version: i64) -> Result<HashMap<PlayerId, Membership>> {
+    let mut st = conn.prepare(
+        "SELECT player_id, club_team_id, club_loaned_from IS NOT NULL AS on_loan, COALESCE(value_eur, 0) AS value
+         FROM ratings WHERE fifa_version = ?1",
+    )?;
+    let rows = st.query_map([version], |r| Ok((r.get("player_id")?, Membership { club: r.get("club_team_id")?, on_loan: r.get("on_loan")?, value: r.get("value")? })))?;
+    rows.collect()
+}
+
 /// Moves every player on to the next edition's real ratings: how the real game changed each rating between this
 /// edition and the next is added to the player's current rating (see `follow_real_change`), so a player the user
 /// has trained or neglected keeps that difference. Wage, value and contract are replaced by the real ones.
 /// Returns false, and changes nothing, when there is no next edition (the data ends at FC 24).
-// shortcut: clubs keep their squads (real transfers are not followed), a player missing from the next edition keeps
+// shortcut: clubs keep their squads (transfers are made separately: `plan_transfers`), a player missing from the next edition keeps
 // his ratings, and the user's contracts are overwritten like everyone's. Upgrade when transfers and contract
 // renewals exist.
 pub fn advance_ratings(conn: &Connection, world: &mut World) -> Result<bool> {
@@ -162,6 +196,9 @@ pub fn advance_ratings(conn: &Connection, world: &mut World) -> Result<bool> {
         p.potential = follow_real_change(p.potential, was.potential, will_be.potential);
         p.attrs = p.attrs.follow_real_change(&was.attrs, &will_be.attrs);
         (p.wage, p.value, p.contract_until) = (will_be.wage, will_be.value, will_be.contract_until);
+        if !will_be.positions.is_empty() {
+            p.positions = will_be.positions.clone(); // the real game moves players to new positions too
+        }
     }
     world.edition = next;
     world.choose_formations(); // the squads' strengths changed
@@ -247,6 +284,40 @@ mod tests {
     }
 
     #[test]
+    fn the_summers_transfers_put_players_at_their_real_next_clubs() {
+        let Some(conn) = db() else { return };
+        let mut w = load_edition(&conn, 15).unwrap();
+        let user = *w.clubs.keys().min().unwrap();
+        let window = plan_transfers(&conn, &w, Some(user)).unwrap();
+        assert!(window.transfers().len() > 1_000, "a real summer has thousands of moves");
+        assert!(window.transfers().iter().all(|t| !(t.from == Some(user) && t.to.is_none())), "the user's players never leave the game");
+        w.make_transfers(window);
+
+        let real = read_memberships(&conn, 16).unwrap();
+        let mut at_real_club = 0;
+        for p in w.players.values() {
+            let wanted = real.get(&p.id).and_then(|m| m.club).filter(|c| w.clubs.contains_key(c));
+            if p.club.is_some() && p.club == wanted {
+                at_real_club += 1;
+            }
+            assert!(p.club.is_none() || w.clubs[&p.club.unwrap()].squad.contains(&p.id), "{} is in his club's squad", p.name);
+        }
+        let with_club = w.players.values().filter(|p| p.club.is_some()).count();
+        assert!(at_real_club * 10 > with_club * 9, "nearly everyone is at his real new club: {at_real_club} of {with_club}");
+    }
+
+    #[test]
+    fn advancing_also_gives_players_their_real_new_positions() {
+        let Some(conn) = db() else { return };
+        let mut w = load_edition(&conn, 15).unwrap();
+        advance_ratings(&conn, &mut w).unwrap();
+        let w16 = load_edition(&conn, 16).unwrap();
+        let same = w.players.values().filter(|p| w16.players.get(&p.id).is_some_and(|q| q.positions == p.positions)).count();
+        let in_both = w.players.keys().filter(|id| w16.players.contains_key(id)).count();
+        assert_eq!(same, in_both, "everyone in both editions has the real positions of the new one");
+    }
+
+    #[test]
     fn there_is_nothing_to_advance_to_after_the_last_edition() {
         let Some(conn) = db() else { return };
         let mut w = World::new(24, 2023);
@@ -261,9 +332,9 @@ mod tests {
         let attr_columns: Vec<String> = Attr::ALL.iter().map(|a| format!("{} INTEGER", a.column())).collect();
         conn.execute_batch(&format!(
             "CREATE TABLE ratings (overall INTEGER, potential INTEGER, wage_eur INTEGER, value_eur INTEGER,
-                                   club_contract_valid_until_year INTEGER, {});
-             INSERT INTO ratings (overall, potential, wage_eur, value_eur, club_contract_valid_until_year, {})
-                 VALUES (81, 85, NULL, 9000000, 2026, {});",
+                                   club_contract_valid_until_year INTEGER, player_positions TEXT, {});
+             INSERT INTO ratings (overall, potential, wage_eur, value_eur, club_contract_valid_until_year, player_positions, {})
+                 VALUES (81, 85, NULL, 9000000, 2026, 'RB, RWB', {});",
             attr_columns.join(", "),
             Attr::ALL.iter().map(|a| a.column()).collect::<Vec<_>>().join(", "),
             Attr::ALL.iter().map(|_| "70").collect::<Vec<_>>().join(", "),

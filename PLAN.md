@@ -61,6 +61,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - **Done when**: a full season can be played start to finish in the GUI
 
 ### M4 - Transfers and finance
+- Done so far: the summer window (`transfer`): the real moves between two editions are made at the end of each season, with a yes/no on every deal that involves your club (`research/game-features/transfers.md`). Not yet: fees paid from budgets, your own bids and transfer list, contract expiry, a model for after FC 24 (no real moves to replay)
 - Player valuation, transfer list, bids with AI accept/reject logic
 - Wage and budget checks, contract expiry
 - AI clubs trade among themselves at a basic level
