@@ -9,7 +9,7 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 - Imports real FIFA player data (FIFA 15 to FC 24, 2014/15 to 2023/24) into one SQLite file
 - Loads any of those editions into the game: every league, club and squad, with the real attributes
 - Generates each league's season fixtures (everyone plays everyone home and away, at most 3 matches per club per week)
-- A window with a **Career** tab (new career: pick a year, a league and a club, see that club's fixtures with dates, and press **Play next match** to simulate it, switch to **My squad** to see how your players' ratings changed since an earlier season, **Lineup** to pick a formation, the starting eleven and the bench by clicking players to swap them (or let the game pick), **Competitions** for any league table or cup rounds, **Finish season** to sim the rest, then **Start next season** for promotion, relegation and new fixtures) and a **Player scout** tab (search any player and see how their stats really changed in later editions)
+- A window with a **Career** tab (new career: pick a year, a league and a club, see that club's fixtures with dates, and press **Play next match** to simulate it, switch to **My squad** to see how your players' ratings changed since an earlier season, **Lineup** to pick a formation, the starting eleven and the bench by clicking players to swap them (or let the game pick; each club gets the formation that suits its squad best), **Competitions** for any league table or cup rounds with the top scorers and assists, **Stats** for the career's leading players by goals, assists, appearances or clean sheets (all time or one season), **Finish season** to sim the rest, then **Start next season** for promotion, relegation and new fixtures) and a **Player scout** tab (search any player and see how their stats really changed in later editions)
 
 ## Planned features (v1)
 
@@ -17,7 +17,7 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 - League table and results
 - Squad management: players, positions, ratings, form, fitness
 - Formation and lineup selection
-- Match simulation with a text commentary feed
+- Match simulation: a shot-based model plays every match (shots, saves, goals with scorer and assister, cards, corners, possession); text commentary and match ratings are still to do
 - Transfer market: buy, sell, contract and budget limits
 - Season rollover: player progression, aging, retirements
 

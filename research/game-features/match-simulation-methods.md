@@ -1,6 +1,6 @@
 # How football matches are simulated, and what our full-detail engine should do
 
-Researched 2026-11-07. Our current engine (`engine/src/sim.rs`) draws two goal counts from team strengths (Poisson with a Dixon-Coles correction), tuned to the real big-five tables. That is the **cheap** tier. PLAN.md says the top five leagues, the Champions League and the user's own competitions should get the **full** tier, with events, so scorers, assists, cards and match ratings exist. This note is about that tier.
+Researched 2026-11-07. The **cheap** tier (`engine/src/sim/cheap.rs`) draws two goal counts from team strengths (Poisson with a Dixon-Coles correction), tuned to the real big-five tables. The **full** tier is built (2026-11-07, `engine/src/sim/shot_based.rs`, tuning and results in [simulation-balance.md](simulation-balance.md)) and currently plays every competition; it follows the design in section 2, with events, scorers, assisters, cards, corners and possession. Match ratings, substitutions, penalties and injuries are still to do. This note is the research and design behind it.
 
 **How reliable this is.** Search results were thin on formulas; the pages I could read in full are named below. Where a number is not published by anyone (rating weights, injury rates) the note says so rather than guessing. The event rates in section 3 are computed by us from real data, not taken from a source.
 

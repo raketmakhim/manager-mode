@@ -90,6 +90,9 @@ The data has up to about 56 leagues per edition and we have researched only a ha
 Designed 2026-11-07. Requirements: top scorers, assist providers, clean sheets and average ratings **per competition**; results, tables and team progression easy to view for every competition.
 
 ### Match reports and stats
+
+**Built so far (2026-11-07):** `engine/src/stats.rs` keeps totals per (player, season, competition) added up from each match's events (apps, minutes, goals, assists, shots, saves, conceded, clean sheets, cards); the events themselves are not kept. `World::stats_for(season, competition)` is the generic query (`None` means all), used by the Competitions top scorers and assists and by the Stats tab. Not built: average ratings, per-match reports kept for the user's club, a minimum-games filter, own goals.
+
 - **The match report is the source of truth.** Each played match stores its outcome and its goal events (scorer, assister, minute). Fuller reports add cards, substitutions, minutes and player ratings.
 - **Outcome is richer than a score:** goals, extra-time goals and a shootout result (shootout goals never count as scorer stats). Two-legged ties also need an aggregate. Today `Fixture.result` is only `(u8, u8)` and must change before the simulation writes results.
 - **Totals are keyed by (season, competition, player)** and updated when a match is recorded; they can be rebuilt from reports. One competition's table reads one key; "all competitions" sums the keys.

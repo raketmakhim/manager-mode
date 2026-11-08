@@ -8,7 +8,7 @@
 //! - `outcome`: the result of a played match (full time, extra time, shootout).
 //! - `overall`: how overall is built from attributes, by position (weights; `overall_change`).
 //! - `rng`: the seeded random number generator every simulation takes.
-//! - `sim`: the match models (cheap: team strength to a score) behind one function, `simulate`.
+//! - `sim`: the match models behind one function, `simulate`: cheap (team strength to a score) and shot-based (shots, saves, goals, cards, corners, possession).
 //! - `source`: building a `World` from history.db.
 //! - `stats`: what each player did, added up from the events of the matches played.
 mod attrs;
