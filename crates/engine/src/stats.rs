@@ -60,21 +60,23 @@ impl PlayerStats {
     }
 }
 
-/// One starter's match while it is being worked out.
+/// One player's match while it is being worked out.
 struct Row {
     id: PlayerId,
     side: Side,
     position: Position,
     /// His rating in the slot (0-99).
     overall: u8,
+    /// The minutes he came on and went off (0 and the length of the match for a starter who played it all).
+    from: u16,
+    to: u16,
     stats: PlayerStats,
 }
 
-/// The stats each starter earned in one match, from its events, with his match rating from `rating_model` and a
+/// The stats each player earned in one match, from its events, with his match rating from `rating_model` and a
 /// player of the match (the best rating on the winning side, or on the pitch if it was a draw). Extra time counts as
-/// minutes; a red card ends the player's minutes.
-// shortcut: no substitutions yet, so everyone in the lineup plays the whole match unless sent off; goals conceded
-// count for the whole lineup even after a red card. Revisit with substitutions.
+/// minutes; a red card or a substitution ends the player's minutes, and a substitute's start at his minute. Goals
+/// conceded are those while he was on the pitch.
 pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: RatingModel) -> Vec<(PlayerId, PlayerStats)> {
     let length = if outcome.extra_time.is_some() { 120 } else { 90 };
     let mut rows: Vec<Row> = vec![];
@@ -82,12 +84,20 @@ pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: Rating
         for slot in 0..11 {
             let id = detail.lineups[side_index][slot];
             if id != 0 {
-                let stats = PlayerStats { appearances: 1, minutes: length, ..PlayerStats::default() };
-                rows.push(Row { id, side, position: detail.positions[side_index][slot], overall: detail.slot_ratings[side_index][slot], stats });
+                let stats = PlayerStats { appearances: 1, ..PlayerStats::default() };
+                rows.push(Row { id, side, position: detail.positions[side_index][slot], overall: detail.slot_ratings[side_index][slot], from: 0, to: length, stats });
             }
         }
     }
     for event in &detail.events {
+        if let Event::Substitution { minute, side, off, on, position, rating } = *event {
+            if let Some(row) = rows.iter_mut().find(|r| r.id == off) {
+                row.to = row.to.min(minute as u16);
+            }
+            let stats = PlayerStats { appearances: 1, ..PlayerStats::default() };
+            rows.push(Row { id: on, side, position, overall: rating, from: minute as u16, to: length, stats });
+            continue;
+        }
         let mut change = |id: PlayerId, apply: &dyn Fn(&mut PlayerStats)| {
             if let Some(row) = rows.iter_mut().find(|r| r.id == id) {
                 apply(&mut row.stats);
@@ -106,17 +116,20 @@ pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: Rating
             }),
             Event::Save { keeper, .. } => change(keeper, &|s| s.saves += 1),
             Event::Yellow { player, .. } => change(player, &|s| s.yellows += 1),
-            Event::Red { player, minute, .. } => change(player, &|s| {
-                s.reds += 1;
-                s.minutes = s.minutes.min(minute as u16);
-            }),
+            Event::Red { player, minute, .. } => {
+                if let Some(row) = rows.iter_mut().find(|r| r.id == player) {
+                    row.stats.reds += 1;
+                    row.to = row.to.min(minute as u16);
+                }
+            }
             _ => {}
         }
     }
-    let goals_by = |side: Side| detail.events.iter().filter(|e| matches!(e, Event::Goal { side: s, .. } if *s == side)).count() as u16;
     for row in rows.iter_mut() {
+        row.stats.minutes = row.to - row.from;
         let against = if row.side == Side::Home { Side::Away } else { Side::Home };
-        row.stats.conceded = goals_by(against);
+        let on_pitch = |minute: u8| row.from < minute as u16 && minute as u16 <= row.to;
+        row.stats.conceded = detail.events.iter().filter(|e| matches!(e, Event::Goal { side, minute, .. } if *side == against && on_pitch(*minute))).count() as u16;
         row.stats.clean_sheets = (row.stats.conceded == 0 && row.stats.minutes >= CLEAN_SHEET_MINUTES) as u16;
     }
     let winner = outcome.winner();
@@ -203,6 +216,23 @@ mod tests {
 
     fn row(stats: &[(PlayerId, PlayerStats)], id: PlayerId) -> PlayerStats {
         stats.iter().find(|r| r.0 == id).unwrap().1
+    }
+
+    #[test]
+    fn a_substitute_plays_from_his_minute_and_concedes_only_what_happens_while_he_is_on() {
+        let events = vec![
+            Event::Goal { minute: 30, side: Side::Away, scorer: 20, assister: None },
+            Event::Substitution { minute: 60, side: Side::Home, off: 9, on: 30, position: Position::St, rating: 68 },
+            Event::Goal { minute: 70, side: Side::Home, scorer: 30, assister: None },
+        ];
+        let stats = match_stats(&detail(events), &Outcome::full_time(1, 1), RatingModel::Formula);
+        assert_eq!(stats.len(), 23);
+        let (off, on) = (row(&stats, 9), row(&stats, 30));
+        assert_eq!((off.minutes, off.appearances, off.conceded), (60, 1, 1));
+        assert_eq!((on.minutes, on.appearances, on.goals, on.conceded), (30, 1, 1, 0));
+        // Played 30 minutes of a match without conceding, but a clean sheet needs 60.
+        assert_eq!(on.clean_sheets, 0);
+        assert!(on.rated == 1, "30 minutes is enough to be rated");
     }
 
     #[test]
@@ -306,7 +336,7 @@ mod tests {
 
     #[test]
     fn equal_ratings_for_the_player_of_the_match_go_to_the_one_with_more_goals_and_assists() {
-        let row = |id, side, goals, assists| Row { id, side, position: Position::St, overall: 70, stats: PlayerStats { goals, assists, ..PlayerStats::default() } };
+        let row = |id, side, goals, assists| Row { id, side, position: Position::St, overall: 70, from: 0, to: 90, stats: PlayerStats { goals, assists, ..PlayerStats::default() } };
         let rows = [row(1, Side::Home, 0, 0), row(2, Side::Home, 1, 1), row(3, Side::Home, 1, 0)];
         let equal = [Some(7.0), Some(7.0), Some(7.0)];
         assert_eq!(player_of_the_match(&rows, &equal, Some(Side::Home)), Some(1), "two goal contributions beat one and none");

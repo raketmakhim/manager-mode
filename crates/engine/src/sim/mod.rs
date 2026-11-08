@@ -10,18 +10,21 @@
 //!
 //! Inside the shot-based model, two parts are models of their own, swapped the same way (a variant and an arm; the
 //! contract tests run through `ALL`): `scoring` (who shoots, scores and assists) and `discipline` (who fouls and is
-//! carded). Player match ratings are a third, in `rating`.
+//! carded) and `substitution` (when changes are made, who goes off and who comes on). Player match ratings are a third, in `rating`.
 mod cheap;
 mod discipline;
 mod pick;
 mod scoring;
 mod shot_based;
+mod substitution;
 
 pub use cheap::team_strength;
 pub use discipline::DisciplineModel;
 pub use scoring::ScoringModel;
+pub use substitution::SubstitutionModel;
 pub use shot_based::{simulate_with as simulate_shot_based, Parts as ShotBasedParts, DEFAULT_PARTS as DEFAULT_SHOT_BASED_PARTS};
 
+use crate::lineup::BENCH_SIZE;
 use crate::model::{PlayerId, Position};
 use crate::outcome::{Outcome, Side};
 use crate::rng::Rng;
@@ -64,7 +67,11 @@ pub const AVERAGE_AGGRESSION: u8 = 60;
 pub struct MatchTeam {
     /// The player in each lineup slot, in `Formation::slots` order (so the goalkeeper is first).
     pub players: [MatchPlayer; 11],
+    /// The substitutes, best first; an empty place has id 0. Each has his main position and his rating there, and plays
+    /// the slot he replaces at that rating.
+    pub bench: [MatchPlayer; BENCH_SIZE],
 }
+
 
 impl MatchPlayer {
     /// True for a lineup slot nobody fills (a club with fewer than eleven players): it never shoots, assists or fouls.
@@ -84,7 +91,9 @@ impl MatchTeam {
     pub(crate) fn flat(rating: u8) -> MatchTeam {
         use crate::lineup::Formation;
         let slots = Formation::FourFourTwo.slots();
-        MatchTeam { players: std::array::from_fn(|i| MatchPlayer { id: i as PlayerId, position: slots[i], rating, finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION }) }
+        let player = |id: PlayerId, position| MatchPlayer { id, position, rating, finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION };
+        let bench_positions = [Position::Gk, Position::Cb, Position::Rb, Position::Cm, Position::Cam, Position::Lw, Position::St];
+        MatchTeam { players: std::array::from_fn(|i| player(i as PlayerId, slots[i])), bench: std::array::from_fn(|i| player(100 + i as PlayerId, bench_positions[i])) }
     }
 }
 
@@ -95,6 +104,8 @@ pub struct MatchInput {
     pub away: MatchTeam,
     /// True for a cup tie: a level score goes on to extra time and then a shootout.
     pub must_have_winner: bool,
+    /// Substitutions each side may make (3 or 5 in the rules of the day).
+    pub max_substitutions: u8,
 }
 
 /// Something that happened in a match.
@@ -121,6 +132,8 @@ pub enum Event {
     Yellow { minute: u8, side: Side, player: PlayerId },
     /// A red card, straight or for a second yellow.
     Red { minute: u8, side: Side, player: PlayerId },
+    /// `on` replaces `off`, taking his place in the lineup: `position` is the slot, `rating` the newcomer's rating.
+    Substitution { minute: u8, side: Side, off: PlayerId, on: PlayerId, position: Position, rating: u8 },
 }
 
 /// What a model that plays the match out returns on top of the score.
@@ -160,7 +173,7 @@ mod tests {
     use super::*;
 
     fn input(home: u8, away: u8, must_have_winner: bool) -> MatchInput {
-        MatchInput { home: MatchTeam::flat(home), away: MatchTeam::flat(away), must_have_winner }
+        MatchInput { home: MatchTeam::flat(home), away: MatchTeam::flat(away), must_have_winner, max_substitutions: 5 }
     }
 
     // Rules every model must keep; a new model is added to `MatchModel::ALL` and these run for it too.

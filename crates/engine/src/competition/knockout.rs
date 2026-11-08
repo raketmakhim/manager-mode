@@ -1,5 +1,5 @@
 //! Single-leg knockout cups: draw a round, play it, draw the next from the winners.
-use super::{Competition, Entry, Format, Rules, Stage, DEFAULT_MODEL};
+use super::{Competition, Entry, Format, Rules, Stage, DEFAULT_MODEL, DEFAULT_SUBSTITUTIONS};
 use crate::model::{ClubId, CompetitionId, Day, Fixture, World};
 use crate::rng::Rng;
 use std::collections::{BTreeMap, HashSet};
@@ -14,7 +14,7 @@ const CUP_DAY: Day = Day::Wednesday;
 impl Rules {
     /// One single-leg knockout of every club. The default for any cup we have not researched.
     pub fn default_cup() -> Rules {
-        Rules { stages: vec![Stage { format: Format::Knockout, entry: Entry::AllClubs }], relegated: 0, model: DEFAULT_MODEL }
+        Rules { stages: vec![Stage { format: Format::Knockout, entry: Entry::AllClubs }], relegated: 0, model: DEFAULT_MODEL, substitutions: DEFAULT_SUBSTITUTIONS }
     }
 }
 

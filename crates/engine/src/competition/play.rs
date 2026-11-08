@@ -1,6 +1,7 @@
 //! Playing fixtures: one match, one week, or everything up to a club's next match.
 use crate::attrs::Attr;
-use crate::lineup::rating_at;
+use super::Competition;
+use crate::lineup::{rating_at, Selection};
 use crate::model::{ClubId, Player, Position, World};
 use crate::rng::Rng;
 use crate::sim::{simulate, MatchInput, MatchPlayer, MatchTeam, AVERAGE_AGGRESSION};
@@ -15,7 +16,7 @@ impl World {
     pub fn play_fixture(&mut self, index: usize, rng: &mut Rng) {
         let f = &self.fixtures[index];
         let (id, competition) = (f.competition, &self.competitions[&f.competition]);
-        let input = self.match_input(f.home, f.away, competition.is_cup());
+        let input = self.match_input(f.home, f.away, competition);
         let report = simulate(competition.rules.model, &input, rng);
         if let Some(detail) = &report.detail {
             self.record_match(id, detail, &report.outcome);
@@ -63,19 +64,25 @@ impl World {
     }
 
     /// What a match model needs to know about the two clubs: their lineups, each player rated in his slot.
-    pub fn match_input(&self, home: ClubId, away: ClubId, must_have_winner: bool) -> MatchInput {
-        MatchInput { home: self.match_team(home), away: self.match_team(away), must_have_winner }
+    pub fn match_input(&self, home: ClubId, away: ClubId, competition: &Competition) -> MatchInput {
+        MatchInput { home: self.match_team(home), away: self.match_team(away), must_have_winner: competition.is_cup(), max_substitutions: competition.rules.substitutions }
     }
 
-    /// The club's lineup as the match models see it. An empty slot is a player with id 0 and rating 0.
+    /// The club's lineup and bench as the match models see them. An empty place is a player with id 0 and rating 0.
     fn match_team(&self, club: ClubId) -> MatchTeam {
         let slots = self.clubs[&club].formation.slots();
-        let lineup = self.lineup_of(club);
+        let Selection { lineup, bench } = self.selection_of(club);
+        let empty = |position| MatchPlayer { id: 0, position, rating: 0, finishing: 0, creativity: 0, aggression: 0 };
         let players = std::array::from_fn(|i| match lineup[i] {
             Some(id) => match_player(&self.players[&id], slots[i]),
-            None => MatchPlayer { id: 0, position: slots[i], rating: 0, finishing: 0, creativity: 0, aggression: 0 },
+            None => empty(slots[i]),
         });
-        MatchTeam { players }
+        // A substitute is rated in his own main position; he takes the slot of whoever he replaces at that rating.
+        let bench = bench.map(|place| match place {
+            Some(id) => match_player(&self.players[&id], self.players[&id].positions[0]),
+            None => empty(Position::Cm),
+        });
+        MatchTeam { players, bench }
     }
 }
 
@@ -173,14 +180,19 @@ mod tests {
     }
 
     #[test]
-    fn the_players_goals_add_up_to_the_table_and_everyone_plays_every_match() {
+    fn the_players_goals_add_up_to_the_table_and_the_lineups_and_minutes_add_up() {
         let mut w = world(8);
         w.play_season_to_end(&mut Rng::new(2));
         let stats = w.stats_for(Some(w.year), Some(1));
         let table = w.table(1);
         assert_eq!(stats.iter().map(|(_, s)| s.goals as u32).sum::<u32>(), table.iter().map(|r| r.goals_for as u32).sum::<u32>());
-        assert_eq!(stats.iter().map(|(_, s)| s.conceded as u32).sum::<u32>(), 11 * table.iter().map(|r| r.goals_against as u32).sum::<u32>());
-        assert!(stats.iter().all(|(_, s)| s.appearances == 14), "8 clubs play 14 league matches each");
+        // Each goal against is conceded by the eleven on the pitch at the time (fewer after a red card), whoever they are.
+        assert!(stats.iter().map(|(_, s)| s.conceded as u32).sum::<u32>() <= 11 * table.iter().map(|r| r.goals_against as u32).sum::<u32>());
+        // Eleven start each of the 14 matches of 8 clubs and a substitute adds an appearance; nobody plays a match twice.
+        assert!(stats.iter().map(|(_, s)| s.appearances as u32).sum::<u32>() >= 11 * 14 * 8);
+        assert!(stats.iter().all(|(_, s)| s.appearances <= 14 && s.minutes <= 14 * 90));
+        // The minutes of a club's players cannot exceed eleven players for the whole of every match.
+        assert!(stats.iter().map(|(_, s)| s.minutes as u32).sum::<u32>() <= 11 * 90 * 14 * 8);
     }
 
     #[test]

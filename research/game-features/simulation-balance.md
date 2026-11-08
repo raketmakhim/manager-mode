@@ -126,7 +126,7 @@ Still off: goal rates are the same in every league (Bundesliga 3.02, La Liga 2.6
 What was needed beyond the plain shot rates:
 - **Draws.** Independent shots give about 22.7% draws (the same as independent Poisson goals). A side that leads keeps only half of its later shots (`LEADER_KEEPS_SHOOTING`), which brings draws to about 24%, 1 point under real. The cost is that goals and shots fall, so the base shot rate is higher to compensate, and the first-half share of the minutes is set a little under the real 44.2% because a lead is built in the first half.
 - **Red cards.** Second yellows alone made reds 0.48 a match; a player already booked is booked a quarter as often (`BOOKED_CAUTION`), which gives the real 0.20.
-- **Not modelled yet:** a side with a player sent off is no weaker (he does leave the pitch: see "Parts as models" below), there are no substitutions, penalties or injuries (no source for their rates yet), no per-league goal rate, and possession (52% for the home side on average) has no real figure to check against.
+- **Not modelled yet:** a side with a player sent off is no weaker (he does leave the pitch: see "Parts as models" below), substitutions are only like-for-like by line and not tactical (see "Substitutions" below), penalties or injuries (no source for their rates yet), no per-league goal rate, and possession (52% for the home side on average) has no real figure to check against.
 
 ### Stars take more shots (2026-11-07)
 
@@ -203,3 +203,16 @@ Change: a player's share of his side's fouls is now `exp(0.037 * aggression)` (t
 The scoring and discipline parts of the shot-based model moved out of `shot_based.rs` into swappable models, with no change to the figures above: `sim/scoring.rs` (`ScoringModel`: `Flat`, `StarWeighted`; the constants for shot share, conversion, keeper factor and assists are there now) and `sim/discipline.rs` (`DisciplineModel`: `Even`, `ByAggression`; the foul, card and aggression constants are there now). Both keep tuning against the figures in this file. `pick` (the capped weighted choice) is in `sim/pick.rs`; it now goes round once per player so the cap holds when several players are far above the rest.
 
 Two fixes came with it: a player sent off is replaced by an empty slot for the rest of the match, extra time included, so he no longer shoots, assists, fouls or is carded again; and a goal that no teammate can have set up has no assister instead of falling back to the goalkeeper.
+
+### Substitutions (2026-11-08)
+
+`sim/substitution.rs` (`SubstitutionModel`: `Never`, `Planned`, default `Planned`) plans each side's changes and picks who goes off and who comes on from the seven on the bench (`MatchTeam.bench`, picked by `lineup::pick_bench`). The number allowed is `Rules.substitutions` (5 for every competition for now: right since 2020/21, 3 before; the rules-by-year work should make it depend on the season).
+
+Real figures found (all Premier League unless said): about 3.9 changes per side per match under the five-change rule, and 3.66 before it was widened (The Substack analysis of 2020/21; 3.85 per side in the first gameweek of 2022/23); the first change at about the 59th to 61st minute (PA analysis of 2021/22: 59th; first gameweek of 2022/23: 61:36); three in four changes after the 60th minute (a 2015/16 to 2022/23 study of four leagues); 13.3% of the goals scored by substitutes in 2023/24, a record (The Analyst; the previous high was 12.8% in 2013/14).
+
+The model: each of the first three allowed changes is used 97% of the time and later ones 50% (3.9 a side when 5 are allowed, 2.9 when 3); a change is at a minute 50 + 40 * the mean of two random numbers (mean 70, so about 80% after the 60th); a player to go off is chosen from the outfield with weights 1.6 forwards, 1.2 midfielders, 0.7 defenders (our guess: attackers are changed most); the replacement is the best unused outfield substitute of the same line, otherwise the best unused one. The newcomer plays the slot at his own rating. The simtool now prints changes per side and the share of goals by substitutes: 3.9 changes and 13.8% of goals over 20 simulated seasons of the big five (real 13.3%), with the other figures above unchanged.
+
+Stats: a substitute gets an appearance and the minutes from his minute; a player taken off or sent off stops at that minute; goals conceded and the clean sheet (60 minutes) now count only while the player was on the pitch (this replaces the old shortcut that gave the whole lineup every goal against).
+
+Not modelled: changes by the state of the match (a side that is losing brings on an attacker), injuries, a goalkeeper replaced, the extra change in extra time, tired players (no stamina in the model), the user choosing changes, and a side with ten men or a changed shape being weaker or stronger.
+

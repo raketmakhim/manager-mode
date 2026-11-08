@@ -33,7 +33,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - **Fixture**: competition, round, week, home, away, result
 - **World**: edition, year, competitions, clubs, players, fixtures (the whole game state)
 - Also built: formation per club (ten formations, chosen automatically unless the user sets one), `stats` (per player, season and competition: apps, minutes, goals, assists, shots, saves, conceded, clean sheets, cards)
-- Also built: match ratings (`rating`, a swappable `RatingModel`; average rating and player of the match in the squad and Stats views). Inside the shot-based match model, `ScoringModel` (shooter, goal chance, assister) and `DisciplineModel` (fouls and cards) are swappable the same way
+- Also built: match ratings (`rating`, a swappable `RatingModel`; average rating and player of the match in the squad and Stats views). Inside the shot-based match model, `ScoringModel` (shooter, goal chance, assister) and `DisciplineModel` (fouls and cards) and `SubstitutionModel` (changes from the bench, 5 a side by default) are swappable the same way
 - Still to add: current week, transfer list, the user's club
 
 ## Milestones

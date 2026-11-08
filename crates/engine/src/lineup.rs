@@ -304,7 +304,7 @@ impl World {
         self.set_selection(club).unwrap_or_else(|| self.picked_selection(club))
     }
 
-    /// Just the lineup of `selection_of`, for the match simulation, which does not use the bench.
+    /// Just the lineup of `selection_of`, for callers that do not need the bench.
     pub fn lineup_of(&self, club: ClubId) -> Lineup {
         match self.set_selection(club) {
             Some(selection) => selection.lineup,

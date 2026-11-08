@@ -69,6 +69,8 @@ struct EventStats {
     fouls: u32,
     yellows: u32,
     reds: u32,
+    substitutions: u32,
+    goals_by_substitutes: u32,
     /// Sum of the home side's possession in percent.
     home_possession: u32,
     /// Goals in the first half (minute 45 or earlier).
@@ -81,18 +83,24 @@ impl EventStats {
     fn measure(world: &World, league: &Competition, rng: &mut Rng) -> EventStats {
         let mut stats = EventStats::default();
         for f in world.fixtures.iter().filter(|f| f.competition == league.id) {
-            let report = simulate(league.rules.model, &world.match_input(f.home, f.away, false), rng);
+            let report = simulate(league.rules.model, &world.match_input(f.home, f.away, league), rng);
             let Some(detail) = report.detail else { return stats };
             stats.matches += 1;
             stats.home_possession += detail.home_possession as u32;
+            let mut substitutes = vec![];
             for event in &detail.events {
                 match *event {
+                    Event::Substitution { on, .. } => {
+                        stats.substitutions += 1;
+                        substitutes.push(on);
+                    }
                     Event::Shot { on_target, .. } => {
                         stats.shots += 1;
                         stats.on_target += on_target as u32;
                     }
-                    Event::Goal { minute, .. } => {
+                    Event::Goal { minute, scorer, .. } => {
                         stats.goals += 1;
+                        stats.goals_by_substitutes += substitutes.contains(&scorer) as u32;
                         stats.first_half_goals += (minute <= 45) as u32;
                     }
                     Event::Corner { .. } => stats.corners += 1,
@@ -114,6 +122,8 @@ impl EventStats {
         self.fouls += o.fouls;
         self.yellows += o.yellows;
         self.reds += o.reds;
+        self.substitutions += o.substitutions;
+        self.goals_by_substitutes += o.goals_by_substitutes;
         self.home_possession += o.home_possession;
         self.first_half_goals += o.first_half_goals;
         self.goals += o.goals;
@@ -126,7 +136,7 @@ impl EventStats {
         }
         let n = self.matches as f64;
         Some(format!(
-            "    per match: {:.1} shots ({:.0}% on target), {:.2} goals per shot, {:.1} corners, {:.1} fouls, {:.2} yellow, {:.2} red, home possession {:.0}%, {:.1}% of goals in the first half",
+            "    per match: {:.1} shots ({:.0}% on target), {:.2} goals per shot, {:.1} corners, {:.1} fouls, {:.2} yellow, {:.2} red, {:.1} substitutions a side ({:.1}% of goals by substitutes), home possession {:.0}%, {:.1}% of goals in the first half",
             self.shots as f64 / n,
             100.0 * self.on_target as f64 / self.shots.max(1) as f64,
             self.goals as f64 / self.shots.max(1) as f64,
@@ -134,6 +144,8 @@ impl EventStats {
             self.fouls as f64 / n,
             self.yellows as f64 / n,
             self.reds as f64 / n,
+            self.substitutions as f64 / (2.0 * n),
+            100.0 * self.goals_by_substitutes as f64 / self.goals.max(1) as f64,
             self.home_possession as f64 / n,
             100.0 * self.first_half_goals as f64 / self.goals.max(1) as f64,
         ))

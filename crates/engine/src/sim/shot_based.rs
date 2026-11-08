@@ -6,7 +6,8 @@
 use super::cheap::{poisson, shootout};
 use super::discipline::{self, Card, DisciplineModel, DEFAULT_DISCIPLINE_MODEL, FOULS_PER_SIDE};
 use super::scoring::{self, ScoringModel, DEFAULT_SCORING_MODEL};
-use super::{Event, MatchDetail, MatchInput, MatchReport, MatchTeam};
+use super::substitution::{self, SubstitutionModel, DEFAULT_SUBSTITUTION_MODEL};
+use super::{Event, MatchDetail, MatchInput, MatchPlayer, MatchReport, MatchTeam};
 use crate::model::{Line, PlayerId};
 use crate::outcome::{Outcome, Side};
 use crate::rng::Rng;
@@ -71,6 +72,7 @@ impl Period {
 enum Action {
     Shot,
     Foul,
+    Substitution,
 }
 
 struct Planned {
@@ -84,9 +86,10 @@ struct Planned {
 pub struct Parts {
     pub scoring: ScoringModel,
     pub discipline: DisciplineModel,
+    pub substitution: SubstitutionModel,
 }
 
-pub const DEFAULT_PARTS: Parts = Parts { scoring: DEFAULT_SCORING_MODEL, discipline: DEFAULT_DISCIPLINE_MODEL };
+pub const DEFAULT_PARTS: Parts = Parts { scoring: DEFAULT_SCORING_MODEL, discipline: DEFAULT_DISCIPLINE_MODEL, substitution: DEFAULT_SUBSTITUTION_MODEL };
 
 pub(super) fn simulate(input: &MatchInput, rng: &mut Rng) -> MatchReport {
     simulate_with(input, DEFAULT_PARTS, rng)
@@ -148,7 +151,7 @@ fn home_possession(input: &MatchInput, rng: &mut Rng) -> f64 {
 }
 
 /// Every shot and foul of a period with its minute, in time order.
-fn plan(input: &MatchInput, home_possession: f64, period: Period, rng: &mut Rng) -> Vec<Planned> {
+fn plan(input: &MatchInput, parts: Parts, home_possession: f64, period: Period, rng: &mut Rng) -> Vec<Planned> {
     let mut planned = vec![];
     for side in [Side::Home, Side::Away] {
         let (me, them) = (team(input, side), team(input, other(side)));
@@ -163,6 +166,14 @@ fn plan(input: &MatchInput, home_possession: f64, period: Period, rng: &mut Rng)
             }
         }
     }
+    // Changes are planned for the 90 minutes only; extra time has none (shortcut: real rules give one more change).
+    if matches!(period, Period::Regulation) {
+        for side in [Side::Home, Side::Away] {
+            for minute in substitution::plan(parts.substitution, input.max_substitutions, rng) {
+                planned.push(Planned { minute, side, action: Action::Substitution });
+            }
+        }
+    }
     planned.sort_by_key(|p| p.minute);
     planned
 }
@@ -172,14 +183,17 @@ fn play_period(input: &MatchInput, parts: Parts, home_possession: f64, period: P
     let teams = [input.home, input.away];
     let mut timeline = Timeline { teams, parts, score: [score.0, score.1], yellows: [[false; 11]; 2], events: vec![] };
     for e in earlier {
-        if let Event::Red { side, player, .. } = *e {
-            timeline.send_off(side, player);
+        match *e {
+            Event::Red { side, player, .. } => timeline.send_off(side, player),
+            Event::Substitution { side, off, on, .. } => timeline.swap_in(side, off, on),
+            _ => {}
         }
     }
-    for p in plan(input, home_possession, period, rng) {
+    for p in plan(input, parts, home_possession, period, rng) {
         match p.action {
             Action::Shot => timeline.shot(p.minute, p.side, rng),
             Action::Foul => timeline.foul(p.minute, p.side, rng),
+            Action::Substitution => timeline.substitute(p.minute, p.side, rng),
         }
     }
     timeline.events
@@ -248,6 +262,24 @@ impl Timeline {
         }
     }
 
+    fn substitute(&mut self, minute: u8, side: Side, rng: &mut Rng) {
+        let team = self.teams[side_index(side)];
+        let Some(change) = substitution::choose(self.parts.substitution, &team, rng) else { return };
+        let (off, on) = (team.players[change.slot], team.bench[change.bench]);
+        self.swap_in(side, off.id, on.id);
+        self.events.push(Event::Substitution { minute, side, off: off.id, on: on.id, position: off.position, rating: on.rating });
+    }
+
+    /// Puts bench player `on` in the slot of `off`, who leaves the match. The newcomer starts with a clean card.
+    fn swap_in(&mut self, side: Side, off: PlayerId, on: PlayerId) {
+        let (team, booked) = (&mut self.teams[side_index(side)], &mut self.yellows[side_index(side)]);
+        let (Some(slot), Some(place)) = (team.players.iter().position(|p| p.id == off), team.bench.iter().position(|p| p.id == on)) else { return };
+        let position = team.players[slot].position;
+        team.players[slot] = MatchPlayer { position, ..team.bench[place] };
+        team.bench[place].id = 0;
+        booked[slot] = false;
+    }
+
     /// Takes the player off the pitch for the rest of the match. The goalkeeper is never sent off here (he never
     /// fouls), so slot 0 stays and the other side always has a keeper to beat.
     fn send_off(&mut self, side: Side, player: PlayerId) {
@@ -269,42 +301,50 @@ mod tests {
     use super::*;
 
     fn input(home: u8, away: u8, must_have_winner: bool) -> MatchInput {
-        MatchInput { home: MatchTeam::flat(home), away: MatchTeam::flat(away), must_have_winner }
+        MatchInput { home: MatchTeam::flat(home), away: MatchTeam::flat(away), must_have_winner, max_substitutions: 5 }
     }
 
     #[test]
     fn every_combination_of_parts_keeps_the_timeline_rules() {
         for &scoring in ScoringModel::ALL {
             for &discipline in DisciplineModel::ALL {
-                let parts = Parts { scoring, discipline };
-                for seed in 0..100 {
-                    let report = simulate_with(&input(72, 70, true), parts, &mut Rng::new(seed));
-                    let events = report.detail.expect("detail").events;
-                    let count = |f: fn(&Event) -> bool| events.iter().filter(|e| f(e)).count();
-                    let on_target = count(|e| matches!(e, Event::Shot { on_target: true, .. }));
-                    assert_eq!(on_target, count(|e| matches!(e, Event::Goal { .. })) + count(|e| matches!(e, Event::Save { .. })), "{parts:?} seed {seed}");
-                    assert!(events.windows(2).all(|w| minute(&w[0]) <= minute(&w[1])), "{parts:?} seed {seed}");
+                for &substitution in SubstitutionModel::ALL {
+                    let parts = Parts { scoring, discipline, substitution };
+                    for seed in 0..100 {
+                        let report = simulate_with(&input(72, 70, true), parts, &mut Rng::new(seed));
+                        let events = report.detail.expect("detail").events;
+                        let count = |f: fn(&Event) -> bool| events.iter().filter(|e| f(e)).count();
+                        let on_target = count(|e| matches!(e, Event::Shot { on_target: true, .. }));
+                        assert_eq!(on_target, count(|e| matches!(e, Event::Goal { .. })) + count(|e| matches!(e, Event::Save { .. })), "{parts:?} seed {seed}");
+                        assert!(events.windows(2).all(|w| minute(&w[0]) <= minute(&w[1])), "{parts:?} seed {seed}");
+                    }
                 }
             }
         }
     }
 
     #[test]
-    fn a_player_sent_off_does_nothing_more_in_the_match_extra_time_included() {
+    fn only_players_on_the_pitch_act_and_a_player_who_has_left_never_returns() {
         for seed in 0..400 {
-            let events = play(&input(70, 70, true), seed).1.events;
-            let mut off = vec![];
-            for e in &events {
+            let detail = play(&input(70, 70, true), seed).1;
+            // Who is on the pitch, by side; the keepers have id 0 in the flat test teams, so skip the id 0.
+            let mut on: Vec<(Side, PlayerId)> = [Side::Home, Side::Away].iter().zip(detail.lineups).flat_map(|(&s, ids)| ids.map(move |id| (s, id))).collect();
+            for e in &detail.events {
                 match *e {
                     Event::Red { side, player, .. } => {
-                        assert!(!off.contains(&(side, player)), "seed {seed}: sent off twice");
-                        off.push((side, player));
+                        assert!(on.contains(&(side, player)), "seed {seed}: sent off while off the pitch");
+                        on.retain(|x| *x != (side, player));
+                    }
+                    Event::Substitution { side, off, on: coming, .. } => {
+                        assert!(on.contains(&(side, off)) && !on.contains(&(side, coming)), "seed {seed}: bad change");
+                        on.retain(|x| *x != (side, off));
+                        on.push((side, coming));
                     }
                     Event::Shot { side, shooter: p, .. } | Event::Foul { side, player: p, .. } | Event::Yellow { side, player: p, .. } => {
-                        assert!(!off.contains(&(side, p)), "seed {seed}: acted after the red card");
+                        assert!(on.contains(&(side, p)), "seed {seed}: {p} acted while off the pitch");
                     }
                     Event::Goal { side, scorer, assister, .. } => {
-                        assert!(!off.contains(&(side, scorer)) && assister.is_none_or(|a| !off.contains(&(side, a))), "seed {seed}");
+                        assert!(on.contains(&(side, scorer)) && assister.is_none_or(|a| on.contains(&(side, a))), "seed {seed}");
                     }
                     _ => {}
                 }
@@ -335,7 +375,7 @@ mod tests {
     fn minute(e: &Event) -> u8 {
         match *e {
             Event::Goal { minute, .. } | Event::Shot { minute, .. } | Event::Save { minute, .. } | Event::Corner { minute, .. } => minute,
-            Event::Foul { minute, .. } | Event::Yellow { minute, .. } | Event::Red { minute, .. } => minute,
+            Event::Foul { minute, .. } | Event::Yellow { minute, .. } | Event::Red { minute, .. } | Event::Substitution { minute, .. } => minute,
         }
     }
 
@@ -354,7 +394,8 @@ mod tests {
 
     #[test]
     fn forwards_score_far_more_than_defenders() {
-        let line_of = |id: u32| MatchTeam::flat(70).players[id as usize].position.line();
+        let flat = MatchTeam::flat(70);
+        let line_of = |id: u32| flat.players.iter().chain(&flat.bench).find(|p| p.id == id).expect("a player of the flat team").position.line();
         let (mut attackers, mut defenders) = (0, 0);
         for seed in 0..500 {
             for e in play(&input(70, 70, false), seed).1.events {
