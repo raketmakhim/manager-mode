@@ -7,6 +7,7 @@
 //! - `model`: the live game state (`World`, `Club`, `Player`...).
 //! - `outcome`: the result of a played match (full time, extra time, shootout).
 //! - `overall`: how overall is built from attributes, by position (weights; `overall_change`).
+//! - `rating`: player match ratings behind one function, `rate` (a swappable `RatingModel`).
 //! - `rng`: the seeded random number generator every simulation takes.
 //! - `sim`: the match models behind one function, `simulate`: cheap (team strength to a score) and shot-based (shots, saves, goals, cards, corners, possession).
 //! - `source`: building a `World` from history.db.
@@ -18,6 +19,7 @@ mod lineup;
 mod model;
 mod outcome;
 mod overall;
+mod rating;
 mod rng;
 mod sim;
 mod source;
@@ -39,6 +41,7 @@ pub use model::{
     NEUTRAL_FORM,
 };
 pub use outcome::{Outcome, Side};
+pub use rating::RatingModel;
 pub use overall::{overall_change, weights};
 pub use rng::Rng;
 pub use sim::{simulate, team_strength, Event, MatchDetail, MatchInput, MatchModel, MatchReport, MatchTeam};

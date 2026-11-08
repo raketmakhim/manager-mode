@@ -17,7 +17,7 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 - League table and results
 - Squad management: players, positions, ratings, form, fitness
 - Formation and lineup selection
-- Match simulation: a shot-based model plays every match (shots, saves, goals with scorer and assister, cards, corners, possession); text commentary and match ratings are still to do
+- Match simulation: a shot-based model plays every match (shots, saves, goals with scorer and assister, cards, corners, possession); each player gets a match rating and the best player of each match is named; text commentary is still to do
 - Transfer market: buy, sell, contract and budget limits
 - Season rollover: player progression, aging, retirements
 

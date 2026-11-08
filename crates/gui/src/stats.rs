@@ -14,10 +14,16 @@ enum Rank {
     Assists,
     Appearances,
     CleanSheets,
+    /// Average match rating; only players with `MIN_RATED_FOR_LEADERS` rated matches count.
+    Rating,
+    PlayerOfTheMatch,
 }
 
+/// Rated matches a player needs to be ranked by average rating (one lucky game would top the list otherwise).
+const MIN_RATED_FOR_LEADERS: u16 = 10;
+
 impl Rank {
-    const ALL: [Rank; 4] = [Rank::Goals, Rank::Assists, Rank::Appearances, Rank::CleanSheets];
+    const ALL: [Rank; 6] = [Rank::Goals, Rank::Assists, Rank::Appearances, Rank::CleanSheets, Rank::Rating, Rank::PlayerOfTheMatch];
 
     fn label(self) -> &'static str {
         match self {
@@ -25,6 +31,8 @@ impl Rank {
             Rank::Assists => "Assists",
             Rank::Appearances => "Appearances",
             Rank::CleanSheets => "Clean sheets",
+            Rank::Rating => "Average rating (10+ matches)",
+            Rank::PlayerOfTheMatch => "Player of the match",
         }
     }
 
@@ -39,6 +47,10 @@ impl Rank {
             Rank::Assists => s.assists,
             Rank::Appearances => s.appearances,
             Rank::CleanSheets => s.clean_sheets,
+            // Hundredths of a rating point, so the ranking keeps the second decimal; 0 drops him from the table.
+            Rank::Rating if s.rated >= MIN_RATED_FOR_LEADERS => s.average_rating().map_or(0, |r| (r * 100.0).round() as u16),
+            Rank::Rating => 0,
+            Rank::PlayerOfTheMatch => s.player_of_the_match,
         }
     }
 }
@@ -104,7 +116,7 @@ pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, state: &mut State) 
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
         egui::Grid::new("stats_table").striped(true).min_col_width(40.0).show(ui, |ui| {
-            for h in ["#", "Player", "Club", "Apps", "Goals", "Assists", "Clean sheets", "Yellow", "Red"] {
+            for h in ["#", "Player", "Club", "Apps", "Goals", "Assists", "Clean sheets", "Yellow", "Red", "Rating", "MotM"] {
                 ui.label(RichText::new(h).strong());
             }
             ui.end_row();
@@ -119,6 +131,8 @@ pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, state: &mut State) 
                 for n in [s.appearances, s.goals, s.assists, s.clean_sheets, s.yellows, s.reds] {
                     ui.label(n.to_string());
                 }
+                ui.label(s.average_rating().map_or("-".to_string(), |r| format!("{r:.2}")));
+                ui.label(s.player_of_the_match.to_string());
                 ui.end_row();
             }
         });

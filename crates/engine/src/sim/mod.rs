@@ -115,6 +115,10 @@ pub struct MatchDetail {
     pub home_possession: u8,
     /// Who started for each side, in lineup slot order (0 for an empty slot).
     pub lineups: [[PlayerId; 11]; 2],
+    /// The slot each of those players plays, in the same order.
+    pub positions: [[Position; 11]; 2],
+    /// Each of those players' rating in his slot (0-99), in the same order.
+    pub slot_ratings: [[u8; 11]; 2],
     /// In time order.
     pub events: Vec<Event>,
 }

@@ -1,8 +1,9 @@
 //! Player stats: what each player did, added up from the events of the matches played. A match gives each player in
 //! its lineup one `PlayerStats` (a pure function of the match events); `World` adds them to the player's season
 //! totals for the competition. Only matches whose model returns events (`MatchDetail`) count.
-use crate::model::{CompetitionId, PlayerId, World};
+use crate::model::{CompetitionId, PlayerId, Position, World};
 use crate::outcome::{Outcome, Side};
+use crate::rating::{rate, RatingInput, RatingModel, TeamResult, DEFAULT_RATING_MODEL};
 use crate::sim::{Event, MatchDetail};
 use std::collections::BTreeMap;
 
@@ -24,6 +25,12 @@ pub struct PlayerStats {
     pub clean_sheets: u16,
     pub yellows: u16,
     pub reds: u16,
+    /// The sum of the match ratings, in tenths (a 7.3 adds 73), over the `rated` matches.
+    pub rating_tenths: u32,
+    /// Matches he was rated in (10 minutes or more).
+    pub rated: u16,
+    /// Matches he was the best player of.
+    pub player_of_the_match: u16,
 }
 
 /// A clean sheet needs at least this many minutes on the pitch.
@@ -42,25 +49,48 @@ impl PlayerStats {
         self.clean_sheets += o.clean_sheets;
         self.yellows += o.yellows;
         self.reds += o.reds;
+        self.rating_tenths += o.rating_tenths;
+        self.rated += o.rated;
+        self.player_of_the_match += o.player_of_the_match;
+    }
+
+    /// His average match rating (3.0 to 10.0), or `None` if he has not been rated yet.
+    pub fn average_rating(&self) -> Option<f32> {
+        (self.rated > 0).then(|| self.rating_tenths as f32 / self.rated as f32 / 10.0)
     }
 }
 
-/// The stats each starter earned in one match, from its events. Extra time counts as minutes; a red card ends the
-/// player's minutes.
+/// One starter's match while it is being worked out.
+struct Row {
+    id: PlayerId,
+    side: Side,
+    position: Position,
+    /// His rating in the slot (0-99).
+    overall: u8,
+    stats: PlayerStats,
+}
+
+/// The stats each starter earned in one match, from its events, with his match rating from `rating_model` and a
+/// player of the match (the best rating on the winning side, or on the pitch if it was a draw). Extra time counts as
+/// minutes; a red card ends the player's minutes.
 // shortcut: no substitutions yet, so everyone in the lineup plays the whole match unless sent off; goals conceded
 // count for the whole lineup even after a red card. Revisit with substitutions.
-pub fn match_stats(detail: &MatchDetail, outcome: &Outcome) -> Vec<(PlayerId, PlayerStats)> {
+pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: RatingModel) -> Vec<(PlayerId, PlayerStats)> {
     let length = if outcome.extra_time.is_some() { 120 } else { 90 };
-    let mut rows: Vec<(PlayerId, Side, PlayerStats)> = vec![];
-    for (lineup, side) in detail.lineups.iter().zip([Side::Home, Side::Away]) {
-        for &id in lineup.iter().filter(|&&id| id != 0) {
-            rows.push((id, side, PlayerStats { appearances: 1, minutes: length, ..PlayerStats::default() }));
+    let mut rows: Vec<Row> = vec![];
+    for (side, side_index) in [Side::Home, Side::Away].into_iter().zip(0..) {
+        for slot in 0..11 {
+            let id = detail.lineups[side_index][slot];
+            if id != 0 {
+                let stats = PlayerStats { appearances: 1, minutes: length, ..PlayerStats::default() };
+                rows.push(Row { id, side, position: detail.positions[side_index][slot], overall: detail.slot_ratings[side_index][slot], stats });
+            }
         }
     }
     for event in &detail.events {
         let mut change = |id: PlayerId, apply: &dyn Fn(&mut PlayerStats)| {
-            if let Some(row) = rows.iter_mut().find(|r| r.0 == id) {
-                apply(&mut row.2);
+            if let Some(row) = rows.iter_mut().find(|r| r.id == id) {
+                apply(&mut row.stats);
             }
         };
         match *event {
@@ -84,17 +114,55 @@ pub fn match_stats(detail: &MatchDetail, outcome: &Outcome) -> Vec<(PlayerId, Pl
         }
     }
     let goals_by = |side: Side| detail.events.iter().filter(|e| matches!(e, Event::Goal { side: s, .. } if *s == side)).count() as u16;
-    for (_, side, s) in rows.iter_mut() {
-        s.conceded = goals_by(if *side == Side::Home { Side::Away } else { Side::Home });
-        s.clean_sheets = (s.conceded == 0 && s.minutes >= CLEAN_SHEET_MINUTES) as u16;
+    for row in rows.iter_mut() {
+        let against = if row.side == Side::Home { Side::Away } else { Side::Home };
+        row.stats.conceded = goals_by(against);
+        row.stats.clean_sheets = (row.stats.conceded == 0 && row.stats.minutes >= CLEAN_SHEET_MINUTES) as u16;
     }
-    rows.into_iter().map(|(id, _, s)| (id, s)).collect()
+    let winner = outcome.winner();
+    let ratings: Vec<Option<f32>> = rows
+        .iter()
+        .map(|row| {
+            let result = match winner {
+                None => TeamResult::Draw,
+                Some(winner) if winner == row.side => TeamResult::Win,
+                Some(_) => TeamResult::Loss,
+            };
+            rate(rating_model, &RatingInput { position: row.position, overall: row.overall, minutes: row.stats.minutes, stats: &row.stats, result })
+        })
+        .collect();
+    let best = player_of_the_match(&rows, &ratings, winner);
+    for (i, (row, rating)) in rows.iter_mut().zip(&ratings).enumerate() {
+        if let Some(rating) = rating {
+            row.stats.rating_tenths = (rating * 10.0).round() as u32;
+            row.stats.rated = 1;
+        }
+        row.stats.player_of_the_match = (best == Some(i)) as u16;
+    }
+    rows.into_iter().map(|r| (r.id, r.stats)).collect()
+}
+
+/// The index of the best-rated player of the winning side, or of everyone if nobody won. A tie in rating goes to the
+/// one with more goals plus assists; a tie in that too, which is rare, to the earlier row.
+fn player_of_the_match(rows: &[Row], ratings: &[Option<f32>], winner: Option<Side>) -> Option<usize> {
+    let mut best: Option<(usize, f32, u16)> = None;
+    for (i, row) in rows.iter().enumerate() {
+        let Some(rating) = ratings[i] else { continue };
+        if winner.is_some_and(|w| w != row.side) {
+            continue;
+        }
+        let involved = row.stats.goals + row.stats.assists;
+        if best.is_none_or(|(_, top, top_involved)| rating > top || (rating == top && involved > top_involved)) {
+            best = Some((i, rating, involved));
+        }
+    }
+    best.map(|(i, _, _)| i)
 }
 
 impl World {
     /// Adds a played match to its players' totals for this season and competition.
     pub fn record_match(&mut self, competition: CompetitionId, detail: &MatchDetail, outcome: &Outcome) {
-        for (player, stats) in match_stats(detail, outcome) {
+        for (player, stats) in match_stats(detail, outcome, DEFAULT_RATING_MODEL) {
             self.stats.entry((player, self.year, competition)).or_default().add(&stats);
         }
     }
@@ -129,7 +197,8 @@ mod tests {
     /// Home players have ids 1-11, away players 12-22; the goalkeepers are 1 and 12.
     fn detail(events: Vec<Event>) -> MatchDetail {
         let lineup = |first: u32| std::array::from_fn(|i| first + i as u32);
-        MatchDetail { home_possession: 50, lineups: [lineup(1), lineup(12)], events }
+        let slots = crate::lineup::Formation::FourFourTwo.slots();
+        MatchDetail { home_possession: 50, lineups: [lineup(1), lineup(12)], positions: [slots, slots], slot_ratings: [[70; 11]; 2], events }
     }
 
     fn row(stats: &[(PlayerId, PlayerStats)], id: PlayerId) -> PlayerStats {
@@ -142,7 +211,7 @@ mod tests {
             Event::Shot { minute: 10, side: Side::Home, shooter: 9, on_target: true },
             Event::Goal { minute: 10, side: Side::Home, scorer: 9, assister: Some(6) },
         ];
-        let stats = match_stats(&detail(events), &Outcome::full_time(1, 0));
+        let stats = match_stats(&detail(events), &Outcome::full_time(1, 0), RatingModel::Formula);
         assert_eq!(stats.len(), 22);
         let scorer = row(&stats, 9);
         assert_eq!((scorer.goals, scorer.shots, scorer.shots_on_target, scorer.appearances, scorer.minutes), (1, 1, 1, 1, 90));
@@ -154,18 +223,18 @@ mod tests {
     #[test]
     fn a_red_card_ends_the_minutes_and_extra_time_adds_thirty() {
         let red = vec![Event::Red { minute: 55, side: Side::Away, player: 15 }];
-        let stats = match_stats(&detail(red), &Outcome::full_time(0, 0));
+        let stats = match_stats(&detail(red), &Outcome::full_time(0, 0), RatingModel::Formula);
         assert_eq!((row(&stats, 15).minutes, row(&stats, 15).reds), (55, 1));
         assert_eq!(row(&stats, 14).minutes, 90);
         let aet = Outcome { full_time: (0, 0), extra_time: Some((0, 0)), shootout: Some((4, 3)) };
-        assert_eq!(row(&match_stats(&detail(vec![]), &aet), 3).minutes, 120);
+        assert_eq!(row(&match_stats(&detail(vec![]), &aet, RatingModel::Formula), 3).minutes, 120);
     }
 
     #[test]
     fn an_empty_slot_is_not_an_appearance_and_totals_add_up_across_matches() {
         let mut d = detail(vec![Event::Save { minute: 30, side: Side::Away, keeper: 12 }]);
         d.lineups[0][10] = 0;
-        assert_eq!(match_stats(&d, &Outcome::full_time(0, 0)).len(), 21);
+        assert_eq!(match_stats(&d, &Outcome::full_time(0, 0), RatingModel::Formula).len(), 21);
 
         let mut w = World::new(0, 2014);
         w.record_match(7, &d, &Outcome::full_time(0, 0));
@@ -177,5 +246,72 @@ mod tests {
         assert_eq!(w.season_stats(12).saves, 3);
         assert_eq!(w.season_stats(12).appearances, 3);
         assert_eq!(w.season_stats(999), PlayerStats::default());
+    }
+
+    #[test]
+    fn a_match_gives_ratings_to_the_players_and_a_player_of_the_match_on_the_winning_side() {
+        let events = vec![
+            Event::Shot { minute: 10, side: Side::Home, shooter: 9, on_target: true },
+            Event::Goal { minute: 10, side: Side::Home, scorer: 9, assister: Some(6) },
+        ];
+        let stats = match_stats(&detail(events), &Outcome::full_time(1, 0), RatingModel::Formula);
+        assert!(stats.iter().all(|(_, s)| s.rated == 1 && s.average_rating().is_some()));
+        assert_eq!(stats.iter().map(|(_, s)| s.player_of_the_match).sum::<u16>(), 1, "one player of the match");
+        assert_eq!(row(&stats, 9).player_of_the_match, 1, "the scorer of the only goal wins it");
+        assert!(row(&stats, 9).average_rating() > row(&stats, 12).average_rating(), "the scorer beats the beaten side");
+        // A draw: the player of the match can come from either side.
+        let draw = match_stats(&detail(vec![]), &Outcome::full_time(0, 0), RatingModel::Formula);
+        assert_eq!(draw.iter().map(|(_, s)| s.player_of_the_match).sum::<u16>(), 1);
+    }
+
+    #[test]
+    fn a_sent_off_player_under_ten_minutes_is_not_rated() {
+        let red = vec![Event::Red { minute: 5, side: Side::Home, player: 4 }];
+        let stats = match_stats(&detail(red), &Outcome::full_time(0, 0), RatingModel::Formula);
+        assert_eq!((row(&stats, 4).rated, row(&stats, 4).average_rating()), (0, None));
+        assert_eq!(row(&stats, 5).rated, 1);
+    }
+
+    #[test]
+    fn simulated_ratings_look_like_real_ones() {
+        // Eight equal clubs play a season; real ratings of starters average about 6.5, most lie between 5.5 and 7.5,
+        // and forwards do not beat defenders by much (research/game-features/match-ratings.md, section 4).
+        let mut w = World::new(0, 2014);
+        for id in 1..=8 {
+            crate::testing::add_club_with_eleven(&mut w, id, 1, 70);
+        }
+        let clubs = (1..=8).collect();
+        let rules = crate::competition::Rules::double_round_robin();
+        w.competitions.insert(1, crate::competition::Competition { id: 1, name: "L".into(), country: "X".into(), rules, level: None, clubs });
+        let mut rng = crate::Rng::new(3);
+        w.start_season(&mut rng);
+        w.play_season_to_end(&mut rng);
+        let mut by_line: std::collections::BTreeMap<&str, Vec<f32>> = Default::default();
+        for (id, s) in w.stats_for(None, Some(1)) {
+            let line = match w.players[&id].positions[0].line() {
+                crate::Line::Goalkeeper => "GK",
+                crate::Line::Defence => "DEF",
+                crate::Line::Midfield => "MID",
+                crate::Line::Attack => "ATT",
+            };
+            by_line.entry(line).or_default().push(s.average_rating().unwrap());
+        }
+        let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+        let all: Vec<f32> = by_line.values().flatten().copied().collect();
+        assert!((6.3..6.7).contains(&mean(&all)), "mean {:.2}", mean(&all));
+        assert!(all.iter().all(|r| (5.5..7.5).contains(r)), "season averages stay between 5.5 and 7.5: {all:?}");
+        let means: Vec<String> = by_line.iter().map(|(line, v)| format!("{line} {:.2}", mean(v))).collect();
+        assert!((mean(&by_line["ATT"]) - mean(&by_line["DEF"])).abs() < 0.3, "by line: {means:?}");
+    }
+
+    #[test]
+    fn equal_ratings_for_the_player_of_the_match_go_to_the_one_with_more_goals_and_assists() {
+        let row = |id, side, goals, assists| Row { id, side, position: Position::St, overall: 70, stats: PlayerStats { goals, assists, ..PlayerStats::default() } };
+        let rows = [row(1, Side::Home, 0, 0), row(2, Side::Home, 1, 1), row(3, Side::Home, 1, 0)];
+        let equal = [Some(7.0), Some(7.0), Some(7.0)];
+        assert_eq!(player_of_the_match(&rows, &equal, Some(Side::Home)), Some(1), "two goal contributions beat one and none");
+        let identical = [row(1, Side::Home, 0, 0), row(2, Side::Away, 0, 0)];
+        assert_eq!(player_of_the_match(&identical, &equal[..2], None), Some(0), "a complete tie goes to the earlier row");
+        assert_eq!(player_of_the_match(&identical, &[Some(6.0), Some(8.0)], None), Some(1), "a better rating wins whatever the goals");
     }
 }

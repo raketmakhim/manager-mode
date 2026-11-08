@@ -123,7 +123,9 @@ pub(super) fn simulate(input: &MatchInput, rng: &mut Rng) -> MatchReport {
         shootout_score = (extra.0 == extra.1).then(|| shootout(rng));
     }
     let lineups = [input.home, input.away].map(|t| t.players.map(|p| p.id));
-    let detail = MatchDetail { home_possession: (home_possession * 100.0).round() as u8, lineups, events };
+    let positions = [input.home, input.away].map(|t| t.players.map(|p| p.position));
+    let slot_ratings = [input.home, input.away].map(|t| t.ratings());
+    let detail = MatchDetail { home_possession: (home_possession * 100.0).round() as u8, lineups, positions, slot_ratings, events };
     MatchReport { outcome: Outcome { full_time, extra_time, shootout: shootout_score }, detail: Some(detail) }
 }
 
