@@ -99,7 +99,7 @@ mod tests {
     fn every_model_keeps_the_goalkeeper_and_empty_slots_out_of_fouls() {
         for &model in DisciplineModel::ALL {
             let mut team = MatchTeam::flat(70);
-            team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0, aggression: 0, stamina: 0 };
+            team.players[10] = MatchPlayer::empty(Position::St);
             let mut rng = Rng::new(4);
             for _ in 0..2000 {
                 let slot = foul(model, &team.players, &[false; 11], &mut rng).slot;

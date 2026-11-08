@@ -1,8 +1,9 @@
 //! The live match window: your match played a minute at a time. The clock runs at a speed you pick, stops by itself at
-//! half time and full time (and at goals if you ask), and while it is stopped you can make changes from the bench.
+//! half time and full time (and at goals if you ask), and you can make changes from the bench, swap players and change the formation at any time.
+use crate::lineup::short_name;
 use crate::{GREEN, RED};
-use eframe::egui::{self, Color32, ProgressBar, RichText};
-use engine::{Event, LiveMatch, PlayerId, Rng, Side, SubstitutionError, World};
+use eframe::egui::{self, Color32, ProgressBar, RichText, Vec2};
+use engine::{Event, Formation, Line, LiveMatch, MatchTeam, PlayerId, Rng, Side, SubstitutionError, TacticsError, World};
 use std::time::Duration;
 
 /// How long a minute of the match lasts for each speed, in real seconds, and what to call it.
@@ -22,7 +23,13 @@ const DEFAULT_SPEED: usize = 3;
 /// The clock stops by itself at half time, at the end of 90 minutes (if extra time follows) and at its break.
 const BREAKS: [u8; 3] = [45, 90, 105];
 /// The height of the match feed, in points.
-const FEED_HEIGHT: f32 = 420.0;
+const FEED_HEIGHT: f32 = 330.0;
+/// The width of the column with the feed and the stats, in points; the rest is the pitch.
+const SIDE_WIDTH: f32 = 330.0;
+/// The size of a player's card on the pitch and the bench.
+const CARD: Vec2 = Vec2::new(112.0, 50.0);
+/// The fill of the card of the player picked.
+const PICKED: Color32 = Color32::from_rgb(60, 110, 180);
 
 /// A match being watched.
 pub struct State {
@@ -30,21 +37,22 @@ pub struct State {
     live: LiveMatch,
     /// Your side.
     side: Side,
+    /// The formation your side is set up in now.
+    formation: Formation,
     playing: bool,
     speed: usize,
     pause_on_goals: bool,
     /// Real seconds since the last minute was played.
     clock: f32,
-    /// The player to take off and the substitute to bring on, picked in the lists.
-    off: Option<PlayerId>,
-    on: Option<PlayerId>,
+    /// The player clicked first: the next click on another player swaps their places, or on a substitute brings him on.
+    picked: Option<PlayerId>,
     /// Why the last change was refused.
     message: Option<String>,
 }
 
 impl State {
-    pub fn new(fixture: usize, live: LiveMatch, side: Side) -> State {
-        State { fixture, live, side, playing: false, speed: DEFAULT_SPEED, pause_on_goals: true, clock: 0.0, off: None, on: None, message: None }
+    pub fn new(fixture: usize, live: LiveMatch, side: Side, formation: Formation) -> State {
+        State { fixture, live, side, formation, playing: false, speed: DEFAULT_SPEED, pause_on_goals: true, clock: 0.0, picked: None, message: None }
     }
 
     /// The fixture and the match, to hand back to the world when the match is done with.
@@ -65,10 +73,17 @@ pub fn ui(ui: &mut egui::Ui, world: &World, s: &mut State, rng: &mut Rng) -> boo
     });
     let done = controls_ui(ui, s, rng);
     ui.separator();
-    ui.columns(3, |columns| {
-        feed_ui(&mut columns[0], world, s);
-        team_ui(&mut columns[1], world, s);
-        stats_ui(&mut columns[2], home, away, &s.live);
+    egui::ScrollArea::vertical().id_salt("live_screen").show(ui, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(SIDE_WIDTH);
+                feed_ui(ui, world, s);
+                ui.add_space(8.0);
+                stats_ui(ui, home, away, &s.live);
+            });
+            ui.separator();
+            ui.vertical(|ui| team_ui(ui, world, s));
+        });
     });
     done
 }
@@ -177,58 +192,99 @@ fn describe(world: &World, event: &Event, s: &State) -> Option<(u8, String, Opti
     })
 }
 
-/// Your eleven with how fresh each is, your bench, and the change you have picked.
+/// Your eleven on a pitch (attack at the top) with how fresh each is, your bench, and your tactics.
 fn team_ui(ui: &mut egui::Ui, world: &World, s: &mut State) {
-    let side = s.side;
-    let name = |id: PlayerId| world.players.get(&id).map_or("?".to_string(), |p| p.name.clone());
-    let team = *s.live.team(side);
-    let tiredness = s.live.tiredness(side);
+    let team = *s.live.team(s.side);
+    let tiredness = s.live.tiredness(s.side);
+    let name = |id: PlayerId| world.players.get(&id).map_or("?".to_string(), |p| short_name(&p.name));
+    let mut clicked = None;
     ui.heading("Your team");
-    ui.label(format!("Changes left: {}", s.live.substitutions_left(side)));
-    ui.label(RichText::new("On the pitch (click to take off)").strong());
-    egui::Grid::new("live_players").show(ui, |ui| {
-        for (slot, p) in team.players.iter().enumerate() {
-            if p.is_empty() {
-                ui.label("");
-                ui.label(RichText::new("sent off").color(RED));
-                ui.end_row();
-                continue;
+    ui.label(format!("Changes left: {}. Click a player, then another player to swap their places, or a substitute to bring him on.", s.live.substitutions_left(s.side)));
+    for line in [Line::Attack, Line::Midfield, Line::Defence, Line::Goalkeeper] {
+        ui.horizontal(|ui| {
+            for (slot, p) in team.players.iter().enumerate().filter(|(_, p)| p.position.line() == line) {
+                ui.vertical(|ui| {
+                    if p.is_empty() {
+                        ui.add_enabled(false, egui::Button::new(format!("{}\nsent off", p.position.code())).min_size(CARD));
+                        return;
+                    }
+                    if card(ui, s.picked == Some(p.id), format!("{}  {}\n{}", p.position.code(), p.rating, name(p.id))) {
+                        clicked = Some(p.id);
+                    }
+                    let energy = 1.0 - tiredness[slot];
+                    ui.add(ProgressBar::new(energy as f32).desired_width(CARD.x).text(format!("{:.0}%", 100.0 * energy)));
+                });
             }
-            ui.label(p.position.code());
-            if ui.selectable_label(s.off == Some(p.id), format!("{}  {}", name(p.id), p.rating)).clicked() {
-                s.off = if s.off == Some(p.id) { None } else { Some(p.id) };
+        });
+        ui.add_space(4.0);
+    }
+    ui.label(RichText::new("Bench").strong());
+    ui.horizontal_wrapped(|ui| {
+        for p in team.bench.iter().filter(|p| !p.is_empty()) {
+            if card(ui, s.picked == Some(p.id), format!("{}  {}\n{}", p.position.code(), p.rating, name(p.id))) {
+                clicked = Some(p.id);
             }
-            ui.add(ProgressBar::new((1.0 - tiredness[slot]) as f32).desired_width(70.0).text(format!("{:.0}%", 100.0 * (1.0 - tiredness[slot]))));
-            ui.end_row();
         }
     });
-    ui.add_space(6.0);
-    ui.label(RichText::new("Bench (click to bring on)").strong());
-    for p in team.bench.iter().filter(|p| !p.is_empty()) {
-        if ui.selectable_label(s.on == Some(p.id), format!("{}  {}  {}", p.position.code(), name(p.id), p.rating)).clicked() {
-            s.on = if s.on == Some(p.id) { None } else { Some(p.id) };
-        }
+    if let Some(id) = clicked {
+        click(s, id, &team);
     }
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let ready = s.off.is_some() && s.on.is_some() && !s.playing && !s.live.is_over();
-        if ui.add_enabled(ready, egui::Button::new("Make change")).clicked() {
-            if let (Some(off), Some(on)) = (s.off, s.on) {
-                match s.live.substitute(side, off, on) {
-                    Ok(()) => {
-                        (s.off, s.on, s.message) = (None, None, None);
-                    }
-                    Err(e) => s.message = Some(refusal(e).to_string()),
-                }
-            }
-        }
-        if s.playing && !s.live.is_over() {
-            ui.label("Pause the match to make a change.");
-        }
-    });
+    tactics_ui(ui, s);
     if let Some(message) = &s.message {
         ui.colored_label(RED, message);
     }
+}
+
+/// A player's card; true when it is clicked.
+fn card(ui: &mut egui::Ui, picked: bool, text: String) -> bool {
+    let fill = if picked { PICKED } else { ui.visuals().widgets.inactive.weak_bg_fill };
+    ui.add(egui::Button::new(text).fill(fill).min_size(CARD)).clicked()
+}
+
+/// A click on a player. The first click picks him; the second, on someone else, does the change: two players on the
+/// pitch trade places, a player on the pitch and a substitute trade (a change), two substitutes just move the pick.
+fn click(s: &mut State, id: PlayerId, team: &MatchTeam) {
+    let Some(first) = s.picked.filter(|&first| first != id) else {
+        s.picked = if s.picked == Some(id) { None } else { Some(id) };
+        return;
+    };
+    let on_pitch = |id| team.players.iter().any(|p| p.id == id && !p.is_empty());
+    s.picked = None;
+    s.message = match (on_pitch(first), on_pitch(id)) {
+        (true, true) => s.live.swap_positions(s.side, first, id).err().map(tactics_refusal),
+        (true, false) => s.live.substitute(s.side, first, id).err().map(|e| refusal(e).to_string()),
+        (false, true) => s.live.substitute(s.side, id, first).err().map(|e| refusal(e).to_string()),
+        (false, false) => {
+            s.picked = Some(id);
+            None
+        }
+    };
+}
+
+/// The formation, which takes effect from the next minute.
+fn tactics_ui(ui: &mut egui::Ui, s: &mut State) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Formation:").strong());
+        let before = s.formation;
+        egui::ComboBox::from_id_salt("live_formation").selected_text(s.formation.name()).show_ui(ui, |ui| {
+            for &f in Formation::ALL {
+                ui.selectable_value(&mut s.formation, f, f.name());
+            }
+        });
+        if s.formation != before {
+            s.live.set_formation(s.side, s.formation.slots());
+            s.picked = None;
+        }
+    });
+}
+
+fn tactics_refusal(error: TacticsError) -> String {
+    match error {
+        TacticsError::NotOnPitch => "That player is not on the pitch.",
+        TacticsError::Keeper => "A goalkeeper cannot swap places with an outfield player.",
+    }
+    .to_string()
 }
 
 fn refusal(error: SubstitutionError) -> &'static str {
@@ -272,10 +328,10 @@ fn stats_ui(ui: &mut egui::Ui, home: &str, away: &str, live: &LiveMatch) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::{Formation, MatchInput, MatchPlayer, MatchTeam, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS};
+    use engine::{Formation, MatchInput, MatchPlayer, MatchTeam, Position, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS};
 
     fn team(first_id: u32) -> MatchTeam {
-        let player = |id, position| MatchPlayer { id, position, rating: 70, finishing: 70, creativity: 70, aggression: 60, stamina: 70 };
+        let player = |id, position| MatchPlayer { id, position, rating: 70, ratings: [70; Position::COUNT], finishing: 70, creativity: 70, aggression: 60, stamina: 70 };
         let slots = Formation::FourFourTwo.slots();
         MatchTeam { players: std::array::from_fn(|i| player(first_id + i as u32, slots[i])), bench: std::array::from_fn(|i| player(first_id + 20 + i as u32, slots[i])) }
     }
@@ -284,7 +340,7 @@ mod tests {
         let mut rng = Rng::new(1);
         let input = MatchInput { home: team(1), away: team(101), must_have_winner: false, max_substitutions: 5 };
         let parts: ShotBasedParts = DEFAULT_SHOT_BASED_PARTS;
-        let mut state = State::new(0, LiveMatch::new(&input, parts, [true, false], &mut rng), Side::Home);
+        let mut state = State::new(0, LiveMatch::new(&input, parts, [true, false], &mut rng), Side::Home, Formation::FourFourTwo);
         state.pause_on_goals = false;
         state.playing = true;
         (state, rng)
@@ -314,4 +370,37 @@ mod tests {
         let goals = s.live.events().iter().filter(|e| matches!(e, Event::Goal { .. })).count();
         assert!(goals == 1 || s.live.minute() == 45, "stopped after {} minutes with {goals} goals", s.live.minute());
     }
+
+    #[test]
+    fn two_clicks_swap_two_players_on_the_pitch_and_a_click_on_the_bench_brings_a_substitute_on() {
+        let (mut s, _) = state();
+        let team = *s.live.team(Side::Home);
+        let (winger, striker) = (team.players[6].id, team.players[10].id);
+        click(&mut s, winger, &team);
+        assert_eq!(s.picked, Some(winger));
+        click(&mut s, striker, &team);
+        assert_eq!((s.picked, s.message.clone()), (None, None));
+        let after = s.live.team(Side::Home);
+        assert_eq!((after.players[6].id, after.players[10].id), (striker, winger), "the two traded places");
+        // A player on the pitch, then a substitute: a change.
+        let team = *s.live.team(Side::Home);
+        let sub = team.bench[5].id;
+        click(&mut s, team.players[5].id, &team);
+        click(&mut s, sub, &team);
+        assert_eq!(s.live.team(Side::Home).players[5].id, sub);
+        assert_eq!(s.live.substitutions_left(Side::Home), 4);
+    }
+
+    #[test]
+    fn a_click_on_the_same_player_cancels_and_a_refused_swap_says_why() {
+        let (mut s, _) = state();
+        let team = *s.live.team(Side::Home);
+        click(&mut s, team.players[3].id, &team);
+        click(&mut s, team.players[3].id, &team);
+        assert_eq!(s.picked, None);
+        click(&mut s, team.players[0].id, &team); // the keeper, then an outfield player
+        click(&mut s, team.players[5].id, &team);
+        assert!(s.message.as_deref().is_some_and(|m| m.contains("goalkeeper")), "{:?}", s.message);
+    }
 }
+

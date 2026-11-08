@@ -16,7 +16,7 @@ impl World {
     pub fn play_fixture(&mut self, index: usize, rng: &mut Rng) {
         let f = &self.fixtures[index];
         let competition = &self.competitions[&f.competition];
-        let input = self.match_input(f.home, f.away, competition);
+        let input = self.match_input(f.home, f.away, competition, None);
         let report = simulate(competition.rules.model, &input, rng);
         self.store_report(index, report);
     }
@@ -82,7 +82,7 @@ impl World {
     pub fn start_live_match(&self, index: usize, club: ClubId, rng: &mut Rng) -> Option<LiveMatch> {
         let f = &self.fixtures[index];
         let competition = &self.competitions[&f.competition];
-        (competition.rules.model == MatchModel::ShotBased).then(|| LiveMatch::new(&self.match_input(f.home, f.away, competition), DEFAULT_SHOT_BASED_PARTS, [f.home == club, f.away == club], rng))
+        (competition.rules.model == MatchModel::ShotBased).then(|| LiveMatch::new(&self.match_input(f.home, f.away, competition, Some(club)), DEFAULT_SHOT_BASED_PARTS, [f.home == club, f.away == club], rng))
     }
 
     /// Plays out whatever is left of a live match, stores its result and draws any cup round that this completes.
@@ -93,36 +93,40 @@ impl World {
     }
 
     /// What a match model needs to know about the two clubs: their lineups, each player rated in his slot.
-    pub fn match_input(&self, home: ClubId, away: ClubId, competition: &Competition) -> MatchInput {
-        MatchInput { home: self.match_team(home), away: self.match_team(away), must_have_winner: competition.is_cup(), max_substitutions: competition.rules.substitutions }
+    ///
+    /// `user_club` is the club whose lineup the user may rearrange during the match, if any: its starters carry their rating
+    /// in every position (about 20% of a season's simulation time if everyone's did, and only the user changes positions).
+    pub fn match_input(&self, home: ClubId, away: ClubId, competition: &Competition, user_club: Option<ClubId>) -> MatchInput {
+        MatchInput { home: self.match_team(home, user_club == Some(home)), away: self.match_team(away, user_club == Some(away)), must_have_winner: competition.is_cup(), max_substitutions: competition.rules.substitutions }
     }
 
     /// The club's lineup and bench as the match models see them. An empty place is a player with id 0 and rating 0.
-    fn match_team(&self, club: ClubId) -> MatchTeam {
+    fn match_team(&self, club: ClubId, every_position: bool) -> MatchTeam {
         let slots = self.clubs[&club].formation.slots();
         let Selection { lineup, bench } = self.selection_of(club);
-        let empty = |position| MatchPlayer { id: 0, position, rating: 0, finishing: 0, creativity: 0, aggression: 0, stamina: 0 };
         let players = std::array::from_fn(|i| match lineup[i] {
-            Some(id) => match_player(&self.players[&id], slots[i]),
-            None => empty(slots[i]),
+            Some(id) => match_player(&self.players[&id], slots[i], every_position),
+            None => MatchPlayer::empty(slots[i]),
         });
-        // A substitute is rated in his own main position; he takes the slot of whoever he replaces at that rating.
+        // A substitute is rated in his own main position and in every other, for the slot of whoever he replaces.
         let bench = bench.map(|place| match place {
-            Some(id) => match_player(&self.players[&id], self.players[&id].positions[0]),
-            None => empty(Position::Cm),
+            Some(id) => match_player(&self.players[&id], self.players[&id].positions[0], true),
+            None => MatchPlayer::empty(Position::Cm),
         });
         MatchTeam { players, bench }
     }
 }
 
-/// One lineup player for a match model. An attribute the data lacks (FIFA 15) counts as his rating in the slot.
-fn match_player(player: &Player, slot: Position) -> MatchPlayer {
+/// One lineup player for a match model. An attribute the data lacks (FIFA 15) counts as his rating in the slot. With
+/// `every_position` false only the rating in his slot is worked out and `ratings` repeats it.
+fn match_player(player: &Player, slot: Position, every_position: bool) -> MatchPlayer {
     let rating = rating_at(player, slot);
     let attr = |a: Attr| player.attrs[a].unwrap_or(rating);
     MatchPlayer {
         id: player.id,
         position: slot,
         rating,
+        ratings: if every_position { std::array::from_fn(|i| rating_at(player, Position::ALL[i])) } else { [rating; Position::COUNT] },
         finishing: attr(Attr::Finishing),
         creativity: creativity(attr(Attr::Vision), attr(Attr::ShortPassing), attr(Attr::LongPassing), attr(Attr::Crossing), attr(Attr::Dribbling)),
         aggression: player.attrs[Attr::Aggression].unwrap_or(AVERAGE_AGGRESSION),

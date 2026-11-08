@@ -44,7 +44,7 @@ pub use outcome::{Outcome, Side};
 pub use rating::RatingModel;
 pub use overall::{overall_change, weights};
 pub use rng::Rng;
-pub use sim::{simulate, simulate_shot_based, team_strength, DisciplineModel, FatigueModel, LiveMatch, SubstitutionError, SubstitutionModel, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS, Event, MatchDetail, MatchInput, MatchModel, MatchPlayer, MatchReport, MatchTeam, ScoringModel};
+pub use sim::{simulate, simulate_shot_based, team_strength, DisciplineModel, FatigueModel, LiveMatch, SubstitutionError, TacticsError, SubstitutionModel, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS, Event, MatchDetail, MatchInput, MatchModel, MatchPlayer, MatchReport, MatchTeam, ScoringModel};
 pub use rusqlite::Connection;
 pub use source::{advance_ratings, editions, load_edition};
 pub use stats::PlayerStats;

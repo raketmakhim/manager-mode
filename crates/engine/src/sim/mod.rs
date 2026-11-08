@@ -25,7 +25,7 @@ pub use discipline::DisciplineModel;
 pub use fatigue::FatigueModel;
 pub use scoring::ScoringModel;
 pub use substitution::SubstitutionModel;
-pub use shot_based::{simulate_with as simulate_shot_based, LiveMatch, Parts as ShotBasedParts, SubstitutionError, DEFAULT_PARTS as DEFAULT_SHOT_BASED_PARTS};
+pub use shot_based::{simulate_with as simulate_shot_based, LiveMatch, Parts as ShotBasedParts, SubstitutionError, TacticsError, DEFAULT_PARTS as DEFAULT_SHOT_BASED_PARTS};
 
 use crate::lineup::BENCH_SIZE;
 use crate::model::{PlayerId, Position};
@@ -54,6 +54,9 @@ pub struct MatchPlayer {
     pub position: Position,
     /// His rating in that slot, 0-99.
     pub rating: u8,
+    /// His rating (0-99) in every position, indexed by `Position::index`: what he would be in another slot. For a
+    /// starter of a side nobody rearranges by hand, only the entry for his own slot is real and the rest repeat it.
+    pub ratings: [u8; Position::COUNT],
     /// How well he finishes, 0-99.
     pub finishing: u8,
     /// How well he sets up goals, 0-99: a weighted mean of vision (50%), short passing (20%), long passing (11%), crossing (11%) and dribbling (8%).
@@ -79,6 +82,11 @@ pub struct MatchTeam {
 
 
 impl MatchPlayer {
+    /// Nobody in a slot: id 0, no rating, never shoots, assists or fouls.
+    pub fn empty(position: Position) -> MatchPlayer {
+        MatchPlayer { id: 0, position, rating: 0, ratings: [0; Position::COUNT], finishing: 0, creativity: 0, aggression: 0, stamina: 0 }
+    }
+
     /// True for a lineup slot nobody fills (a club with fewer than eleven players): it never shoots, assists or fouls.
     pub fn is_empty(&self) -> bool {
         self.id == 0
@@ -96,7 +104,7 @@ impl MatchTeam {
     pub(crate) fn flat(rating: u8) -> MatchTeam {
         use crate::lineup::Formation;
         let slots = Formation::FourFourTwo.slots();
-        let player = |id: PlayerId, position| MatchPlayer { id, position, rating, finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION, stamina: rating };
+        let player = |id: PlayerId, position| MatchPlayer { id, position, rating, ratings: [rating; Position::COUNT], finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION, stamina: rating };
         let bench_positions = [Position::Gk, Position::Cb, Position::Rb, Position::Cm, Position::Cam, Position::Lw, Position::St];
         MatchTeam { players: std::array::from_fn(|i| player(i as PlayerId + 1, slots[i])), bench: std::array::from_fn(|i| player(100 + i as PlayerId, bench_positions[i])) }
     }

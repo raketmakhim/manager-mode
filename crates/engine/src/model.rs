@@ -42,6 +42,10 @@ macro_rules! positions {
         impl Position {
             /// Every position, in the order they are listed below.
             pub const ALL: &'static [Position] = &[$(Position::$name),*];
+            /// How many positions there are, for an array with one value per position.
+            pub const COUNT: usize = Position::ALL.len();
+            /// His place in `ALL` (0 for the goalkeeper), to index such an array.
+            pub fn index(self) -> usize { self as usize }
             /// Short code, e.g. "ST".
             pub fn code(self) -> &'static str { match self { $(Position::$name => $code),* } }
             /// The part of the pitch he plays on.

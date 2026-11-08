@@ -196,7 +196,7 @@ fn positions_text(p: &Player) -> String {
 }
 
 /// "Marcus Rashford" becomes "M. Rashford"; a single name stays as it is.
-fn short_name(name: &str) -> String {
+pub(crate) fn short_name(name: &str) -> String {
     let words: Vec<&str> = name.split_whitespace().collect();
     match words.as_slice() {
         [] => String::new(),

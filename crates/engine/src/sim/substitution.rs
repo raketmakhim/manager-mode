@@ -90,10 +90,11 @@ pub(super) fn choose(model: SubstitutionModel, team: &MatchTeam, tiredness: &[f6
             }
             let slot = pick(&team.players, off_weight, 1.0, rng);
             let line = team.players[slot].position.line();
-            // The best unused outfield player of the same line, otherwise the best unused outfield player.
+            // The unused outfield player who plays the slot best, from the same line if there is one.
             let outfield = |(_, p): &(usize, &MatchPlayer)| !p.is_empty() && p.position.line() != Line::Goalkeeper;
+            let in_slot = |p: &MatchPlayer| p.ratings[team.players[slot].position.index()];
             let best = |same_line: bool| {
-                team.bench.iter().enumerate().filter(outfield).filter(|(_, p)| !same_line || p.position.line() == line).max_by_key(|(_, p)| p.rating).map(|(i, _)| i)
+                team.bench.iter().enumerate().filter(outfield).filter(|(_, p)| !same_line || p.position.line() == line).max_by_key(|(_, p)| in_slot(p)).map(|(i, _)| i)
             };
             best(true).or_else(|| best(false)).map(|bench| Change { slot, bench })
         }
@@ -103,6 +104,7 @@ pub(super) fn choose(model: SubstitutionModel, team: &MatchTeam, tiredness: &[f6
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Position;
 
     // Rules every model must keep; a new model is added to `SubstitutionModel::ALL` and these run for it too.
 
@@ -175,5 +177,28 @@ mod tests {
         let off = |tiredness: &[f64; 11], rng: &mut Rng| (0..4000).filter(|_| choose(SubstitutionModel::Planned, &team, tiredness, rng).unwrap().slot == 8).count();
         let (spent, fresh) = (off(&tired, &mut rng), off(&[0.0; 11], &mut rng));
         assert!(spent as f64 > 1.5 * fresh as f64, "{spent} against {fresh}");
+    }
+
+    #[test]
+    fn with_no_cover_from_the_same_line_the_model_brings_on_whoever_plays_the_slot_best() {
+        let mut team = MatchTeam::flat(70);
+        // The bench has only a striker and a midfielder left, and the striker is the better player but poor at the back.
+        for (i, p) in team.bench.iter_mut().enumerate() {
+            if i != 4 && i != 6 {
+                p.id = 0;
+            }
+        }
+        team.bench[6].rating = 85;
+        team.bench[6].ratings[Position::Cb.index()] = 40;
+        team.bench[4].ratings[Position::Cb.index()] = 60;
+        let mut tired = [0.0; 11];
+        tired[2] = 1.0; // one centre-back is spent, so he is the one to go
+        let mut rng = Rng::new(9);
+        for _ in 0..200 {
+            let change = choose(SubstitutionModel::Planned, &team, &tired, &mut rng).unwrap();
+            let slot_position = team.players[change.slot].position;
+            let best_in_slot = team.bench.iter().filter(|p| !p.is_empty()).map(|p| p.ratings[slot_position.index()]).max().unwrap();
+            assert_eq!(team.bench[change.bench].ratings[slot_position.index()], best_in_slot);
+        }
     }
 }

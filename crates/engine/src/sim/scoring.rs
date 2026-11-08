@@ -140,7 +140,7 @@ mod tests {
     fn every_model_picks_a_filled_outfield_slot_to_shoot_and_never_the_scorer_to_assist() {
         for &model in ScoringModel::ALL {
             let mut team = MatchTeam::flat(70);
-            team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0, aggression: 0, stamina: 0 };
+            team.players[10] = MatchPlayer::empty(Position::St);
             let mut rng = Rng::new(2);
             for _ in 0..2000 {
                 let slot = shooter(model, &team.players, &mut rng);

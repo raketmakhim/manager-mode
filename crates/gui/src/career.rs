@@ -96,7 +96,7 @@ impl Career {
         match world.start_live_match(index, club, &mut self.rng) {
             Some(live) => {
                 let side = if world.fixtures[index].home == club { Side::Home } else { Side::Away };
-                self.live = Some(live::State::new(index, live, side));
+                self.live = Some(live::State::new(index, live, side, world.clubs[&club].formation));
             }
             None => {
                 world.play_fixture(index, &mut self.rng);

@@ -39,10 +39,6 @@ const FIRST_HALF_SHARE: f64 = 0.41;
 const EXTRA_TIME_SHARE: f64 = 1.0 / 3.0;
 /// The sides' strengths are worked out again every this many minutes (and at once after a change or a red card).
 const STRENGTH_REFRESH_MINUTES: u8 = 5;
-/// A substitute who plays in a different line from the one he is replacing is this many rating points worse there.
-// shortcut: one flat penalty; the lineup knows his real rating in every position (`lineup::rating_at`), pass those
-// through `MatchTeam::bench` when a user's changes across lines matter.
-const OFF_LINE_PENALTY: u8 = 10;
 
 /// The home side's share of the ball against an equal side: a little over half.
 const HOME_POSSESSION: f64 = 0.52;
@@ -135,6 +131,15 @@ pub enum SubstitutionError {
     Keeper,
 }
 
+/// Why a change of positions by hand was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TacticsError {
+    /// One of the players is not on the pitch.
+    NotOnPitch,
+    /// A goalkeeper may not swap with an outfield player.
+    Keeper,
+}
+
 /// A match being played, a minute at a time. The user can change a side between minutes.
 #[derive(Clone, Debug)]
 pub struct LiveMatch {
@@ -208,7 +213,7 @@ impl LiveMatch {
     pub fn tiredness(&self, side: Side) -> [f64; 11] {
         let i = side_index(side);
         let ball_share = self.ball_share(side);
-        std::array::from_fn(|slot| fatigue::tiredness(self.parts.fatigue, &self.teams[i].players[slot], self.minute - self.came_on[i][slot], ball_share))
+        std::array::from_fn(|slot| fatigue::tiredness(self.parts.fatigue, &self.teams[i].players[slot], self.minute.saturating_sub(self.came_on[i][slot]), ball_share))
     }
 
     /// Changes a side may still make.
@@ -251,6 +256,57 @@ impl LiveMatch {
                 self.foul(minute, side, rng);
             }
         }
+    }
+
+    /// Swaps the slots of two players on the pitch. Each plays at his own rating in the other's slot. A goalkeeper
+    /// cannot swap with an outfield player.
+    pub fn swap_positions(&mut self, side: Side, a: PlayerId, b: PlayerId) -> Result<(), TacticsError> {
+        let i = side_index(side);
+        let players = &self.teams[i].players;
+        let find = |id: PlayerId| players.iter().position(|p| p.id == id && !p.is_empty());
+        let (Some(slot_a), Some(slot_b)) = (find(a), find(b)) else { return Err(TacticsError::NotOnPitch) };
+        if (slot_a == 0) != (slot_b == 0) {
+            return Err(TacticsError::Keeper);
+        }
+        let players = &mut self.teams[i].players;
+        let (position_a, position_b) = (players[slot_a].position, players[slot_b].position);
+        players.swap(slot_a, slot_b);
+        for (slot, position) in [(slot_a, position_a), (slot_b, position_b)] {
+            players[slot].position = position;
+            players[slot].rating = players[slot].ratings[position.index()];
+        }
+        self.yellows[i].swap(slot_a, slot_b);
+        self.came_on[i].swap(slot_a, slot_b);
+        self.refresh_strength();
+        Ok(())
+    }
+
+    /// Changes a side to a new formation (`slots`, the goalkeeper first, as `Formation::slots` gives them). The
+    /// goalkeeper stays; the outfield players go to the slots where they are rated highest: the best (player, slot)
+    /// match first, then the next, ties to the lower player id and the earlier slot, as in `lineup::pick_lineup`. A
+    /// player's card and the minute he came on go with him. A side with a player sent off leaves one slot empty.
+    pub fn set_formation(&mut self, side: Side, slots: [Position; 11]) {
+        let i = side_index(side);
+        let (old, booked, came_on) = (self.teams[i].players, self.yellows[i], self.came_on[i]);
+        let mut pairs: Vec<(u8, PlayerId, usize, usize)> = vec![]; // (rating in the new slot, player id, old slot, new slot)
+        for from in (1..11).filter(|&from| !old[from].is_empty()) {
+            for (to, position) in slots.iter().enumerate().skip(1) {
+                pairs.push((old[from].ratings[position.index()], old[from].id, from, to));
+            }
+        }
+        pairs.sort_by_key(|&(rating, id, _, to)| (std::cmp::Reverse(rating), id, to));
+        let (mut filled, mut moved) = ([None; 11], [false; 11]);
+        for (_, _, from, to) in pairs {
+            if filled[to].is_none() && !moved[from] {
+                (filled[to], moved[from]) = (Some(from), true);
+            }
+        }
+        self.teams[i].players[0].position = slots[0];
+        for to in 1..11 {
+            let player = filled[to].map_or(MatchPlayer::empty(slots[to]), |from| MatchPlayer { position: slots[to], rating: old[from].ratings[slots[to].index()], ..old[from] });
+            (self.teams[i].players[to], self.yellows[i][to], self.came_on[i][to]) = (player, filled[to].is_some_and(|from| booked[from]), filled[to].map_or(0, |from| came_on[from]));
+        }
+        self.refresh_strength();
     }
 
     /// Hands a side run by hand over to the `substitution` model for the rest of the match, as if the user stopped
@@ -311,7 +367,7 @@ impl LiveMatch {
             let mut tired = self.teams[i];
             let ball_share = self.ball_share(side);
             for (slot, p) in tired.players.iter_mut().enumerate() {
-                p.rating = fatigue::tired_rating(self.parts.fatigue, p, self.minute - self.came_on[i][slot], ball_share);
+                p.rating = fatigue::tired_rating(self.parts.fatigue, p, self.minute.saturating_sub(self.came_on[i][slot]), ball_share);
             }
             self.strength[i] = (attack(&tired), defence(&tired));
         }
@@ -375,13 +431,12 @@ impl LiveMatch {
     }
 
     /// Puts bench player `on` in the slot of `off`, who leaves the match, and records it. The newcomer starts with a
-    /// clean card and plays at his rating, less `OFF_LINE_PENALTY` if the slot is in another line from his own position.
+    /// clean card and plays at his own rating in that slot.
     fn change(&mut self, minute: u8, side: Side, off: PlayerId, on: PlayerId) {
         let (team, booked) = (&mut self.teams[side_index(side)], &mut self.yellows[side_index(side)]);
         let (Some(slot), Some(place)) = (team.players.iter().position(|p| p.id == off), team.bench.iter().position(|p| p.id == on)) else { return };
         let (position, newcomer) = (team.players[slot].position, team.bench[place]);
-        let penalty = if newcomer.position.line() == position.line() { 0 } else { OFF_LINE_PENALTY };
-        let rating = newcomer.rating.saturating_sub(penalty);
+        let rating = newcomer.ratings[position.index()];
         team.players[slot] = MatchPlayer { position, rating, ..newcomer };
         team.bench[place].id = 0;
         booked[slot] = false;
@@ -542,15 +597,65 @@ mod tests {
     }
 
     #[test]
-    fn a_substitute_from_another_line_plays_worse_than_one_from_the_same_line() {
-        let (mut m, _) = live(&input(70, 70, false), [true, true], 3);
-        let bench = m.team(Side::Home).bench;
-        let (back, forward) = (m.team(Side::Home).players[1].id, m.team(Side::Home).players[10].id);
-        // The bench striker (index 6) replaces a defender, and the bench centre-back (index 1) a forward.
-        m.substitute(Side::Home, back, bench[6].id).unwrap();
-        m.substitute(Side::Home, forward, bench[1].id).unwrap();
+    fn a_substitute_plays_at_his_own_rating_in_the_slot_he_takes() {
+        let mut i = input(70, 70, false);
+        i.home.bench[6].ratings[Position::Lb.index()] = 40; // the bench striker is poor at left back
+        let mut rng = Rng::new(3);
+        let mut m = LiveMatch::new(&i, DEFAULT_PARTS, [true, true], &mut rng);
+        let (back, striker) = (m.team(Side::Home).players[1], m.team(Side::Home).bench[6]);
+        assert_eq!(back.position, Position::Lb);
+        m.substitute(Side::Home, back.id, striker.id).unwrap();
+        assert_eq!((m.team(Side::Home).players[1].rating, m.team(Side::Home).players[1].position), (40, Position::Lb));
+    }
+
+    #[test]
+    fn two_players_swapped_take_each_others_slot_at_their_own_rating() {
+        let mut i = input(70, 70, false);
+        i.home.players[10].ratings[Position::Cm.index()] = 50; // the striker (slot 10) is poor in midfield
+        let mut rng = Rng::new(4);
+        let mut m = LiveMatch::new(&i, DEFAULT_PARTS, [true, true], &mut rng);
+        let (midfielder, striker) = (m.team(Side::Home).players[6], m.team(Side::Home).players[10]);
+        (m.yellows[0][6], m.came_on[0][10]) = (true, 55); // the midfielder is booked and the striker came on at 55
+        assert_eq!(m.swap_positions(Side::Home, midfielder.id, striker.id), Ok(()));
+        assert_eq!((m.yellows[0][10], m.yellows[0][6], m.came_on[0][6], m.came_on[0][10]), (true, false, 55, 0), "the card and the minute follow the player");
+        let (team, keeper) = (*m.team(Side::Home), m.team(Side::Home).players[0].id);
+        assert_eq!((team.players[6].id, team.players[6].position, team.players[6].rating), (striker.id, midfielder.position, 50));
+        assert_eq!((team.players[10].id, team.players[10].position), (midfielder.id, striker.position));
+        assert_eq!(m.swap_positions(Side::Home, midfielder.id, 999), Err(TacticsError::NotOnPitch));
+        assert_eq!(m.swap_positions(Side::Home, keeper, striker.id), Err(TacticsError::Keeper));
+    }
+
+    #[test]
+    fn a_new_formation_puts_every_outfield_player_in_a_slot_once_and_keeps_the_keeper() {
+        let (mut m, _) = live(&input(70, 70, false), [true, true], 5);
+        let before: Vec<PlayerId> = m.team(Side::Home).players.iter().map(|p| p.id).collect();
+        let slots = crate::lineup::Formation::ALL.iter().find(|f| f.slots() != m.team(Side::Home).players.map(|p| p.position)).unwrap().slots();
+        let (booked, late) = (m.team(Side::Home).players[3].id, m.team(Side::Home).players[8].id);
+        (m.yellows[0][3], m.came_on[0][8]) = (true, 70);
+        m.set_formation(Side::Home, slots);
+        let slot_of = |m: &LiveMatch, id| m.team(Side::Home).players.iter().position(|p| p.id == id).unwrap();
+        assert!(m.yellows[0][slot_of(&m, booked)] && m.yellows[0].iter().filter(|&&y| y).count() == 1, "the card follows the player");
+        assert_eq!(m.came_on[0][slot_of(&m, late)], 70, "so does the minute he came on");
         let team = m.team(Side::Home);
-        assert_eq!((team.players[1].rating, team.players[10].rating), (60, 60), "10 points less in another line");
+        let mut after: Vec<PlayerId> = team.players.iter().map(|p| p.id).collect();
+        assert_eq!(after[0], before[0], "the keeper stays in goal");
+        assert_eq!(team.players.map(|p| p.position), slots);
+        let (mut a, mut b) = (after.clone(), before.clone());
+        a.sort();
+        b.sort();
+        assert_eq!(a, b, "the same eleven");
+        after.dedup();
+        assert_eq!(after.len(), 11);
+    }
+
+    #[test]
+    fn a_new_formation_with_a_player_sent_off_leaves_one_slot_empty() {
+        let (mut m, _) = live(&input(70, 70, false), [true, true], 6);
+        let defender = m.team(Side::Home).players[2].id;
+        m.send_off(Side::Home, defender);
+        let slots = crate::lineup::Formation::ALL.iter().find(|f| f.slots() != m.team(Side::Home).players.map(|p| p.position)).unwrap().slots();
+        m.set_formation(Side::Home, slots);
+        assert_eq!(m.team(Side::Home).players.iter().filter(|p| p.is_empty()).count(), 1);
     }
 
     #[test]
