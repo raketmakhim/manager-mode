@@ -301,10 +301,12 @@ fn load_world(options: &Options) -> World {
         eprintln!("cannot open {}: {e}. Build it first: cargo run -p import --release", options.db);
         std::process::exit(1);
     });
-    load_edition(&conn, options.edition).unwrap_or_else(|e| {
+    let mut world = load_edition(&conn, options.edition).unwrap_or_else(|e| {
         eprintln!("cannot load edition {}: {e}", options.edition);
         std::process::exit(1);
-    })
+    });
+    world.choose_formations(); // as a new career does
+    world
 }
 
 fn main() {

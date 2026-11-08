@@ -7,6 +7,7 @@ mod leagues;
 mod lineup;
 mod scout;
 mod squad;
+mod stats;
 
 use eframe::egui::{self, Color32};
 use engine::Connection;

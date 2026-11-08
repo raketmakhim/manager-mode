@@ -5,6 +5,7 @@ use crate::attrs::Attrs;
 use crate::competition::Competition;
 use crate::lineup::{Formation, Selection};
 use crate::outcome::{Outcome, Side};
+use crate::stats::PlayerStats;
 use std::collections::BTreeMap;
 
 /// Same number as `player_id` in history.db, so we can look up a player's real future.
@@ -110,6 +111,9 @@ pub struct Club {
     pub budget: Option<i64>,
     /// How the club lines up.
     pub formation: Formation,
+    /// True once the user has chosen the formation or the lineup: `World::choose_formations` leaves it alone. False:
+    /// the game picks the formation that suits the squad.
+    pub formation_set: bool,
     /// The starting eleven and the bench the user has set. Empty means nothing was set, and `World::selection_of`
     /// picks one. Read it through `selection_of`, not from here.
     pub selection: Selection,
@@ -204,6 +208,8 @@ pub struct World {
     pub clubs: BTreeMap<ClubId, Club>,
     pub players: BTreeMap<PlayerId, Player>,
     pub fixtures: Vec<Fixture>,
+    /// What each player did, by (player, season start year, competition). Filled as matches with detail are played.
+    pub stats: BTreeMap<(PlayerId, u16, CompetitionId), PlayerStats>,
 }
 
 impl World {
@@ -216,6 +222,7 @@ impl World {
             clubs: BTreeMap::new(),
             players: BTreeMap::new(),
             fixtures: vec![],
+            stats: BTreeMap::new(),
         }
     }
 }

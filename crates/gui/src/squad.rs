@@ -62,7 +62,7 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, checkpoints: &[Checkpo
     ui.columns(2, |columns| {
         egui::ScrollArea::vertical().id_salt("squad_table").show(&mut columns[0], |ui| {
             egui::Grid::new("squad").striped(true).min_col_width(40.0).show(ui, |ui| {
-                for h in ["Player", "Pos", "Age", "Overall", "", "Potential", ""] {
+                for h in ["Player", "Pos", "Age", "Overall", "", "Potential", "", "Apps", "Goals", "Assists"] {
                     ui.label(RichText::new(h).strong());
                 }
                 ui.end_row();
@@ -78,6 +78,10 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, checkpoints: &[Checkpo
                     change_label(ui, was.map(|w| p.overall as i32 - w.overall as i32));
                     ui.label(p.potential.to_string());
                     change_label(ui, was.map(|w| p.potential as i32 - w.potential as i32));
+                    let stats = world.season_stats(p.id);
+                    for n in [stats.appearances, stats.goals, stats.assists] {
+                        ui.label(n.to_string());
+                    }
                     ui.end_row();
                 }
             });

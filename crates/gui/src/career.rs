@@ -2,7 +2,7 @@
 use crate::leagues::{league_label, sorted_leagues};
 use crate::squad::{self, Checkpoint};
 use crate::lineup;
-use crate::{competitions, fixtures, RED};
+use crate::{competitions, fixtures, stats, RED};
 use eframe::egui;
 use engine::{advance_ratings, edition_label, editions, load_edition, season_label, season_name, ClubId, CompetitionId, Connection, Rng, World};
 
@@ -24,6 +24,7 @@ pub struct Career {
     checkpoints: Vec<Checkpoint>,
     squad: squad::State,
     lineup: lineup::State,
+    stats: stats::State,
     /// Seeded when the career starts; every simulated match draws from it.
     rng: Rng,
     /// The result of the last match you played, for the line next to the button.
@@ -34,7 +35,7 @@ pub struct Career {
 impl Career {
     pub fn new(conn: &Connection) -> Self {
         let editions = editions(conn).unwrap_or_default();
-        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, checkpoints: vec![], squad: squad::State::default(), lineup: lineup::State::default(), rng: Rng::new(0), last_played: None, error: None }
+        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, checkpoints: vec![], squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), rng: Rng::new(0), last_played: None, error: None }
     }
 
     /// Loads the picked edition and selects the first league and club.
@@ -215,6 +216,7 @@ impl Career {
             ui.selectable_value(&mut self.view, View::Squad, "My squad");
             ui.selectable_value(&mut self.view, View::Lineup, "Lineup");
             ui.selectable_value(&mut self.view, View::Competitions, "Competitions");
+            ui.selectable_value(&mut self.view, View::Stats, "Stats");
         });
         ui.add_space(6.0);
         match self.view {
@@ -226,6 +228,7 @@ impl Career {
                 }
             }
             View::Competitions => competitions::ui(ui, world, club_id, &mut self.competition),
+            View::Stats => stats::ui(ui, world, club_id, &mut self.stats),
         }
     }
 }
@@ -235,6 +238,7 @@ impl Career {
 enum View {
     Fixtures,
     Competitions,
+    Stats,
     Squad,
     Lineup,
 }

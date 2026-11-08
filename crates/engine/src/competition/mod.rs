@@ -115,6 +115,7 @@ impl World {
     /// Game setup for a freshly loaded world: adds the default cups, makes every league's fixtures and draws
     /// the first round of every cup. The one call a new career makes.
     pub fn start_season(&mut self, rng: &mut Rng) {
+        self.choose_formations();
         self.add_default_cups();
         self.generate_fixtures();
         self.advance_cups(rng);

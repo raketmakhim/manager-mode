@@ -36,7 +36,7 @@ pub fn player_with_attrs(id: PlayerId, overall: u8, positions: &[Position], attr
 
 /// A club in `league` with the given squad.
 pub fn club(id: ClubId, league: CompetitionId, squad: Vec<PlayerId>) -> Club {
-    Club { id, name: format!("C{id}"), league, squad, budget: None, selection: Selection::default(), formation: Formation::default() }
+    Club { id, name: format!("C{id}"), league, squad, budget: None, selection: Selection::default(), formation: Formation::default(), formation_set: false }
 }
 
 /// Adds a club of eleven natural 4-4-2 players, all rated `overall`, to the world. Their ids are `club_id * 100 + 0..11`.

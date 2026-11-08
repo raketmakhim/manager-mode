@@ -41,6 +41,7 @@ pub fn load_edition(conn: &Connection, version: i64) -> Result<World> {
                 squad: vec![],
                 budget: r.get("budget")?,
                 formation: Formation::default(),
+                formation_set: false,
                 selection: Selection::default(),
             },
             r.get::<_, String>("league_name")?,
@@ -162,6 +163,7 @@ pub fn advance_ratings(conn: &Connection, world: &mut World) -> Result<bool> {
         (p.wage, p.value, p.contract_until) = (will_be.wage, will_be.value, will_be.contract_until);
     }
     world.edition = next;
+    world.choose_formations(); // the squads' strengths changed
     Ok(true)
 }
 

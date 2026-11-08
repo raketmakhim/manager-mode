@@ -39,11 +39,16 @@ pub fn ui(ui: &mut egui::Ui, world: &mut World, club: ClubId, state: &mut State)
         ui.label(format!("Team strength {:.1}", team_strength(&world.lineup_ratings(club))));
     });
     if formation != world.clubs[&club].formation || pick_best {
-        // A different formation has different slots, so a set selection no longer fits; both go back to automatic.
+        // A different formation has different slots, so a set selection no longer fits; the selection goes back to
+        // automatic. Choosing a formation keeps it; the Automatic button lets the game choose it again.
         let c = world.clubs.get_mut(&club).unwrap();
         c.formation = formation;
+        c.formation_set = !pick_best;
         c.selection = Selection::default();
         state.selected = None;
+        if pick_best {
+            world.choose_formation(club);
+        }
     }
     ui.label(if world.has_set_selection(club) {
         "Your own selection: the game keeps it until you press Automatic."
@@ -73,7 +78,9 @@ pub fn ui(ui: &mut egui::Ui, world: &mut World, club: ClubId, state: &mut State)
             Some(first) => {
                 let mut changed = current;
                 changed.swap(first, spot);
-                world.clubs.get_mut(&club).unwrap().selection = changed;
+                let c = world.clubs.get_mut(&club).unwrap();
+                c.selection = changed;
+                c.formation_set = true; // the lineup was made for this formation, so keep it
                 state.selected = None;
             }
             None => state.selected = Some(spot),

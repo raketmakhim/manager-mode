@@ -10,6 +10,7 @@
 //! - `rng`: the seeded random number generator every simulation takes.
 //! - `sim`: the match models (cheap: team strength to a score) behind one function, `simulate`.
 //! - `source`: building a `World` from history.db.
+//! - `stats`: what each player did, added up from the events of the matches played.
 mod attrs;
 mod competition;
 mod history;
@@ -20,6 +21,7 @@ mod overall;
 mod rng;
 mod sim;
 mod source;
+mod stats;
 #[cfg(test)]
 mod testing;
 
@@ -42,3 +44,4 @@ pub use rng::Rng;
 pub use sim::{simulate, team_strength, Event, MatchDetail, MatchInput, MatchModel, MatchReport, MatchTeam};
 pub use rusqlite::Connection;
 pub use source::{advance_ratings, editions, load_edition};
+pub use stats::PlayerStats;

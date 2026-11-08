@@ -31,12 +31,29 @@ pub enum Formation {
     FourThreeThree,
     FourTwoThreeOne,
     ThreeFiveTwo,
+    FourOneFourOne,
+    FourFourOneOne,
+    /// The diamond: a holding midfielder, two central ones and an attacking one behind two strikers.
+    FourOneTwoOneTwo,
+    ThreeFourTwoOne,
+    ThreeFourThree,
+    FiveThreeTwo,
 }
 
 impl Formation {
     /// Every formation, in the order they are shown.
-    pub const ALL: &'static [Formation] =
-        &[Formation::FourFourTwo, Formation::FourThreeThree, Formation::FourTwoThreeOne, Formation::ThreeFiveTwo];
+    pub const ALL: &'static [Formation] = &[
+        Formation::FourFourTwo,
+        Formation::FourThreeThree,
+        Formation::FourTwoThreeOne,
+        Formation::ThreeFiveTwo,
+        Formation::FourOneFourOne,
+        Formation::FourFourOneOne,
+        Formation::FourOneTwoOneTwo,
+        Formation::ThreeFourTwoOne,
+        Formation::ThreeFourThree,
+        Formation::FiveThreeTwo,
+    ];
 
     /// "4-4-2".
     pub fn name(self) -> &'static str {
@@ -45,6 +62,12 @@ impl Formation {
             Formation::FourThreeThree => "4-3-3",
             Formation::FourTwoThreeOne => "4-2-3-1",
             Formation::ThreeFiveTwo => "3-5-2",
+            Formation::FourOneFourOne => "4-1-4-1",
+            Formation::FourFourOneOne => "4-4-1-1",
+            Formation::FourOneTwoOneTwo => "4-1-2-1-2",
+            Formation::ThreeFourTwoOne => "3-4-2-1",
+            Formation::ThreeFourThree => "3-4-3",
+            Formation::FiveThreeTwo => "5-3-2",
         }
     }
 
@@ -57,6 +80,12 @@ impl Formation {
             Formation::FourThreeThree => &[&[Gk], &[Lb, Cb, Cb, Rb], &[Cm, Cdm, Cm], &[Lw, St, Rw]],
             Formation::FourTwoThreeOne => &[&[Gk], &[Lb, Cb, Cb, Rb], &[Cdm, Cdm], &[Lm, Cam, Rm], &[St]],
             Formation::ThreeFiveTwo => &[&[Gk], &[Cb, Cb, Cb], &[Lwb, Cdm, Cm, Cam, Rwb], &[St, St]],
+            Formation::FourOneFourOne => &[&[Gk], &[Lb, Cb, Cb, Rb], &[Cdm], &[Lm, Cm, Cm, Rm], &[St]],
+            Formation::FourFourOneOne => &[&[Gk], &[Lb, Cb, Cb, Rb], &[Lm, Cm, Cm, Rm], &[Cam], &[St]],
+            Formation::FourOneTwoOneTwo => &[&[Gk], &[Lb, Cb, Cb, Rb], &[Cdm], &[Cm, Cm], &[Cam], &[St, St]],
+            Formation::ThreeFourTwoOne => &[&[Gk], &[Cb, Cb, Cb], &[Lwb, Cm, Cm, Rwb], &[Cam, Cam], &[St]],
+            Formation::ThreeFourThree => &[&[Gk], &[Cb, Cb, Cb], &[Lwb, Cm, Cm, Rwb], &[Lw, St, Rw]],
+            Formation::FiveThreeTwo => &[&[Gk], &[Lwb, Cb, Cb, Cb, Rwb], &[Cm, Cdm, Cm], &[St, St]],
         }
     }
 
@@ -78,9 +107,15 @@ pub enum Familiarity {
     OtherLine,
 }
 
+/// True if the two positions are the same job: a centre-forward and a striker are listed apart in the data (FIFA
+/// lists some forwards only as CF) but play the same role, so neither counts as out of position in the other.
+fn same_role(a: Position, b: Position) -> bool {
+    a == b || matches!((a, b), (Position::St, Position::Cf) | (Position::Cf, Position::St))
+}
+
 /// How well `slot` suits the player.
 pub fn familiarity(player: &Player, slot: Position) -> Familiarity {
-    if player.positions.contains(&slot) {
+    if player.positions.iter().any(|&p| same_role(p, slot)) {
         Familiarity::Natural
     } else if player.positions.iter().any(|p| p.line() == slot.line()) {
         Familiarity::SameLine
@@ -104,6 +139,7 @@ pub fn rating_at(player: &Player, slot: Position) -> u8 {
     if (slot == Position::Gk) != (main == Position::Gk) {
         return player.overall.saturating_sub(KEEPER_MISMATCH_PENALTY);
     }
+    let slot = if same_role(main, slot) { main } else { slot }; // his own role: his overall
     let familiarity = familiarity(player, slot);
     let rating = match (formula_at(player, slot), formula_at(player, main)) {
         (Some(there), Some(here)) => {
@@ -143,6 +179,18 @@ pub fn pick_lineup(squad: &[&Player], formation: Formation) -> Lineup {
         }
     }
     lineup
+}
+
+/// The formation whose best eleven has the highest total rating. A tie goes to the earlier one in `Formation::ALL`, so
+/// the usual 4-4-2 is kept unless another shape is really better.
+pub fn best_formation(squad: &[&Player]) -> Formation {
+    let total = |formation: Formation| -> u32 {
+        let slots = formation.slots();
+        let lineup = pick_lineup(squad, formation);
+        let rating = |slot: usize| lineup[slot].and_then(|id| squad.iter().find(|p| p.id == id)).map_or(0, |p| rating_at(p, slots[slot]) as u32);
+        (0..11).map(rating).sum()
+    };
+    Formation::ALL.iter().copied().rev().max_by_key(|&f| total(f)).unwrap_or_default()
 }
 
 /// The substitutes: a back-up goalkeeper, then the best remaining player of each line (defence, midfield, attack),
@@ -222,6 +270,22 @@ impl Selection {
 }
 
 impl World {
+    /// Gives every club that has not had its formation chosen by the user the formation that suits its squad best.
+    /// Call it when squads or ratings change (a new season); the match simulation does not do it, to stay fast.
+    pub fn choose_formations(&mut self) {
+        let unset: Vec<ClubId> = self.clubs.values().filter(|c| !c.formation_set).map(|c| c.id).collect();
+        for club in unset {
+            self.choose_formation(club);
+        }
+    }
+
+    /// Gives one club the formation that suits its squad best, whether or not the user had set one.
+    pub fn choose_formation(&mut self, club: ClubId) {
+        let squad: Vec<&Player> = self.clubs[&club].squad.iter().map(|p| &self.players[p]).collect();
+        let formation = best_formation(&squad);
+        self.clubs.get_mut(&club).expect("club exists").formation = formation;
+    }
+
     /// The selection the user set for the club, if there is one and it is still valid (everyone still in the squad,
     /// nobody twice). An empty or out-of-date one counts as not set.
     fn set_selection(&self, club: ClubId) -> Option<Selection> {
@@ -321,9 +385,9 @@ mod tests {
     #[test]
     fn a_listed_second_position_has_no_familiarity_penalty_but_an_unlisted_one_has() {
         let attrs = [(Attr::Finishing, 70), (Attr::Dribbling, 70)];
-        let listed = player_with_attrs(1, 80, &[St, Cf], &attrs);
+        let listed = player_with_attrs(1, 80, &[St, Lw], &attrs);
         let unlisted = player_with_attrs(2, 80, &[St], &attrs);
-        assert_eq!(rating_at(&unlisted, Cf) + UNFAMILIAR_PENALTY, rating_at(&listed, Cf));
+        assert_eq!(rating_at(&unlisted, Lw) + UNFAMILIAR_PENALTY, rating_at(&listed, Lw));
     }
 
     #[test]
@@ -487,5 +551,54 @@ mod tests {
             assert_eq!(full, clubs, "edition {edition}: every club with a real squad fills eleven slots and the bench");
             assert!(keeper_in_goal * 100 >= clubs * 99, "edition {edition}: only {keeper_in_goal} of {clubs} have a keeper in goal");
         }
+    }
+
+    /// A squad of a keeper, 4 defenders, 3 midfielders and three forwards, every player rated 70.
+    fn squad_with_three_forwards() -> Vec<Player> {
+        let positions = [Gk, Lb, Cb, Cb, Rb, Cm, Cm, Cm, Lw, St, Rw];
+        positions.iter().enumerate().map(|(i, &p)| player(i as u32 + 1, 70, &[p])).collect()
+    }
+
+    #[test]
+    fn a_squad_built_for_three_forwards_gets_a_formation_with_three_forwards() {
+        let squad = squad_with_three_forwards();
+        let refs: Vec<&Player> = squad.iter().collect();
+        let formation = best_formation(&refs);
+        let forwards = formation.slots().iter().filter(|p| p.line() == Line::Attack).count();
+        assert_eq!(forwards, 3, "{}", formation.name());
+    }
+
+    #[test]
+    fn the_chosen_formation_never_rates_below_any_other() {
+        let squad = squad_with_three_forwards();
+        let refs: Vec<&Player> = squad.iter().collect();
+        let total = |f: Formation| -> u32 {
+            let lineup = pick_lineup(&refs, f);
+            f.slots().iter().zip(lineup).map(|(&slot, id)| rating_at(refs.iter().find(|p| Some(p.id) == id).unwrap(), slot) as u32).sum()
+        };
+        let best = total(best_formation(&refs));
+        assert!(Formation::ALL.iter().all(|&f| total(f) <= best));
+    }
+
+    #[test]
+    fn a_tie_keeps_the_first_formation_and_a_formation_the_user_set_is_left_alone() {
+        let mut w = World::new(0, 0);
+        crate::testing::add_club_with_eleven(&mut w, 1, 1, 70); // natural 4-4-2 players: nothing beats 4-4-2
+        crate::testing::add_club_with_eleven(&mut w, 2, 1, 70);
+        w.clubs.get_mut(&2).unwrap().formation = Formation::ThreeFiveTwo;
+        w.clubs.get_mut(&2).unwrap().formation_set = true;
+        w.choose_formations();
+        assert_eq!(w.clubs[&1].formation, Formation::FourFourTwo);
+        assert_eq!(w.clubs[&2].formation, Formation::ThreeFiveTwo);
+    }
+
+    #[test]
+    fn a_centre_forward_and_a_striker_are_the_same_role() {
+        let cf_only = player_with_attrs(1, 90, &[Cf], &[(Attr::Finishing, 90), (Attr::Heading, 30), (Attr::Strength, 30)]);
+        assert_eq!(rating_at(&cf_only, St), 90, "no penalty and no formula gap");
+        assert_eq!(familiarity(&cf_only, St), Familiarity::Natural);
+        let st_only = player(2, 85, &[St]);
+        assert_eq!(rating_at(&st_only, Cf), 85);
+        assert_ne!(familiarity(&cf_only, Lw), Familiarity::Natural, "a winger is still another role");
     }
 }

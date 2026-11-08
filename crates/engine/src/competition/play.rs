@@ -10,13 +10,16 @@ impl World {
     /// always get a winner.
     // shortcut: recomputes both lineups on every match (a whole-world season of about 10,000 matches takes 0.5 s in a
     // release build, 10 s in debug); cache per club, cleared when ratings or squads change, when the simtool runs
-    // thousands of seasons. The event detail of a full-model match is dropped here; keep it for the matches that
-    // matter (the user's club, the top competitions) once something shows it.
+    // thousands of seasons. The events of a match only feed the player stats; they are not kept. Keep them for the
+    // matches that matter (the user's club, finals) once something shows them.
     pub fn play_fixture(&mut self, index: usize, rng: &mut Rng) {
         let f = &self.fixtures[index];
-        let competition = &self.competitions[&f.competition];
+        let (id, competition) = (f.competition, &self.competitions[&f.competition]);
         let input = self.match_input(f.home, f.away, competition.is_cup());
         let report = simulate(competition.rules.model, &input, rng);
+        if let Some(detail) = &report.detail {
+            self.record_match(id, detail, &report.outcome);
+        }
         self.fixtures[index].result = Some(report.outcome);
     }
 
@@ -70,7 +73,7 @@ impl World {
         let lineup = self.lineup_of(club);
         let players = std::array::from_fn(|i| match lineup[i] {
             Some(id) => match_player(&self.players[&id], slots[i]),
-            None => MatchPlayer { id: 0, line: slots[i].line(), rating: 0, finishing: 0, creativity: 0 },
+            None => MatchPlayer { id: 0, position: slots[i], rating: 0, finishing: 0, creativity: 0 },
         });
         MatchTeam { players }
     }
@@ -82,11 +85,18 @@ fn match_player(player: &Player, slot: Position) -> MatchPlayer {
     let attr = |a: Attr| player.attrs[a].unwrap_or(rating);
     MatchPlayer {
         id: player.id,
-        line: slot.line(),
+        position: slot,
         rating,
         finishing: attr(Attr::Finishing),
-        creativity: ((attr(Attr::Vision) as u16 + attr(Attr::ShortPassing) as u16) / 2) as u8,
+        creativity: creativity(attr(Attr::Vision), attr(Attr::ShortPassing), attr(Attr::LongPassing), attr(Attr::Crossing), attr(Attr::Dribbling)),
     }
+}
+
+/// How well a player sets up goals (0-99): vision 50%, short passing 20%, long passing 11%, crossing 11%, dribbling 8%
+/// (our design: vision counts most, then short passing, then the longer deliveries, then dribbling; no real data to fit).
+fn creativity(vision: u8, short_passing: u8, long_passing: u8, crossing: u8, dribbling: u8) -> u8 {
+    let weighted = 50 * vision as u16 + 20 * short_passing as u16 + 11 * long_passing as u16 + 11 * crossing as u16 + 8 * dribbling as u16;
+    (weighted / 100) as u8
 }
 
 #[cfg(test)]
@@ -159,5 +169,25 @@ mod tests {
         assert_eq!(w.fixtures.iter().filter(|f| f.competition == cup).count(), 7, "8 clubs: 7 cup matches in 3 rounds");
         assert!(w.fixtures.iter().all(|f| f.result.is_some()));
         assert!(w.calendar_problems().is_empty());
+    }
+
+    #[test]
+    fn the_players_goals_add_up_to_the_table_and_everyone_plays_every_match() {
+        let mut w = world(8);
+        w.play_season_to_end(&mut Rng::new(2));
+        let stats = w.stats_for(Some(w.year), Some(1));
+        let table = w.table(1);
+        assert_eq!(stats.iter().map(|(_, s)| s.goals as u32).sum::<u32>(), table.iter().map(|r| r.goals_for as u32).sum::<u32>());
+        assert_eq!(stats.iter().map(|(_, s)| s.conceded as u32).sum::<u32>(), 11 * table.iter().map(|r| r.goals_against as u32).sum::<u32>());
+        assert!(stats.iter().all(|(_, s)| s.appearances == 14), "8 clubs play 14 league matches each");
+    }
+
+    #[test]
+    fn creativity_weights_vision_then_short_passing_then_long_passing_and_crossing_then_dribbling() {
+        assert_eq!(creativity(80, 80, 80, 80, 80), 80);
+        assert_eq!(creativity(0, 0, 0, 0, 0), 0);
+        let only = |v, sp, lp, cr, dr| creativity(v, sp, lp, cr, dr);
+        // 100 in one attribute and 0 elsewhere gives that attribute's share.
+        assert_eq!([only(100, 0, 0, 0, 0), only(0, 100, 0, 0, 0), only(0, 0, 100, 0, 0), only(0, 0, 0, 100, 0), only(0, 0, 0, 0, 100)], [50, 20, 11, 11, 8]);
     }
 }

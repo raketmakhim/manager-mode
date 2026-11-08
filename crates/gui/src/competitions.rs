@@ -1,7 +1,8 @@
 //! The Competitions view: pick a league or cup and see its table or its rounds.
 use crate::leagues::league_label;
+use crate::stats::leaders;
 use eframe::egui::{self, RichText};
-use engine::{match_date, ClubId, Competition, CompetitionId, Fixture, World};
+use engine::{match_date, ClubId, Competition, CompetitionId, Fixture, PlayerId, PlayerStats, World};
 
 /// Shows one competition. `selected` is the pick; `None` means the league of `my_club`.
 pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, selected: &mut Option<CompetitionId>) {
@@ -20,11 +21,50 @@ pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, selected: &mut Opti
     });
     ui.add_space(6.0);
 
-    if competition.is_cup() {
-        cup_ui(ui, world, competition, my_club);
-    } else {
-        table_ui(ui, world, competition, my_club);
+    ui.columns(2, |columns| {
+        if competition.is_cup() {
+            cup_ui(&mut columns[0], world, competition, my_club);
+        } else {
+            table_ui(&mut columns[0], world, competition, my_club);
+        }
+        leaders_ui(&mut columns[1], world, competition, my_club);
+    });
+}
+
+/// How many players the leader tables show.
+const LEADERS_SHOWN: usize = 10;
+
+/// The top scorers and the top assisters of the competition this season.
+fn leaders_ui(ui: &mut egui::Ui, world: &World, competition: &Competition, my_club: ClubId) {
+    let stats = world.stats_for(Some(world.year), Some(competition.id));
+    if stats.is_empty() {
+        ui.label("No goals yet.");
+        return;
     }
+    leaders_table(ui, world, my_club, "Top scorers", "Goals", &stats, |s| s.goals);
+    ui.add_space(12.0);
+    leaders_table(ui, world, my_club, "Top assists", "Assists", &stats, |s| s.assists);
+}
+
+fn leaders_table(ui: &mut egui::Ui, world: &World, my_club: ClubId, title: &str, heading: &str, stats: &[(PlayerId, PlayerStats)], count: impl Fn(&PlayerStats) -> u16) {
+    ui.label(RichText::new(title).strong());
+    egui::Grid::new(title).striped(true).min_col_width(40.0).show(ui, |ui| {
+        for h in ["#", "Player", "Club", heading] {
+            ui.label(RichText::new(h).strong());
+        }
+        ui.end_row();
+        for (place, (id, s)) in leaders(stats, &count, true, LEADERS_SHOWN).into_iter().enumerate() {
+            let player = &world.players[&id];
+            ui.label((place + 1).to_string());
+            ui.label(&player.name);
+            match player.club {
+                Some(club) => ui.label(club_text(world, club, my_club)),
+                None => ui.label(""),
+            };
+            ui.label(count(&s).to_string());
+            ui.end_row();
+        }
+    });
 }
 
 /// A club's name, in bold if it is the player's club.

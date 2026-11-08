@@ -12,7 +12,7 @@ mod shot_based;
 
 pub use cheap::team_strength;
 
-use crate::model::{Line, PlayerId};
+use crate::model::{PlayerId, Position};
 use crate::outcome::{Outcome, Side};
 use crate::rng::Rng;
 
@@ -34,13 +34,13 @@ impl MatchModel {
 #[derive(Clone, Copy, Debug)]
 pub struct MatchPlayer {
     pub id: PlayerId,
-    /// The part of the pitch of the slot he plays (not of his own main position).
-    pub line: Line,
+    /// The slot he plays (not his own main position).
+    pub position: Position,
     /// His rating in that slot, 0-99.
     pub rating: u8,
     /// How well he finishes, 0-99.
     pub finishing: u8,
-    /// How well he sets up goals (passing and vision), 0-99.
+    /// How well he sets up goals, 0-99: a weighted mean of vision (50%), short passing (20%), long passing (11%), crossing (11%) and dribbling (8%).
     pub creativity: u8,
 }
 
@@ -49,6 +49,13 @@ pub struct MatchPlayer {
 pub struct MatchTeam {
     /// The player in each lineup slot, in `Formation::slots` order (so the goalkeeper is first).
     pub players: [MatchPlayer; 11],
+}
+
+impl MatchPlayer {
+    /// True for a lineup slot nobody fills (a club with fewer than eleven players): it never shoots, assists or fouls.
+    pub fn is_empty(&self) -> bool {
+        self.id == 0
+    }
 }
 
 impl MatchTeam {
@@ -60,13 +67,9 @@ impl MatchTeam {
     /// A 4-4-2 of eleven equal players, for tests of a model.
     #[cfg(test)]
     pub(crate) fn flat(rating: u8) -> MatchTeam {
-        let line = |slot: usize| match slot {
-            0 => Line::Goalkeeper,
-            1..=4 => Line::Defence,
-            5..=8 => Line::Midfield,
-            _ => Line::Attack,
-        };
-        MatchTeam { players: std::array::from_fn(|i| MatchPlayer { id: i as PlayerId, line: line(i), rating, finishing: rating, creativity: rating }) }
+        use crate::lineup::Formation;
+        let slots = Formation::FourFourTwo.slots();
+        MatchTeam { players: std::array::from_fn(|i| MatchPlayer { id: i as PlayerId, position: slots[i], rating, finishing: rating, creativity: rating }) }
     }
 }
 
@@ -110,6 +113,8 @@ pub enum Event {
 pub struct MatchDetail {
     /// The home side's share of the ball, in percent (0-100).
     pub home_possession: u8,
+    /// Who started for each side, in lineup slot order (0 for an empty slot).
+    pub lineups: [[PlayerId; 11]; 2],
     /// In time order.
     pub events: Vec<Event>,
 }

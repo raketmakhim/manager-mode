@@ -4,7 +4,7 @@
 //! Pure functions, no `World`. Design and real figures: `research/game-features/match-simulation-methods.md`.
 use super::cheap::{poisson, shootout};
 use super::{Event, MatchDetail, MatchInput, MatchPlayer, MatchReport, MatchTeam};
-use crate::model::Line;
+use crate::model::{Line, Position};
 use crate::outcome::{Outcome, Side};
 use crate::rng::Rng;
 
@@ -13,23 +13,42 @@ use crate::rng::Rng;
 // `research/game-features/simulation-balance.md`. Rerun the simtool after changing any of them.
 
 /// Shots a side takes in 90 minutes against an equal side with half the ball, before the home bonus.
-const BASE_SHOTS: f64 = 12.8;
+const BASE_SHOTS: f64 = 13.0;
 /// The home side's shots are multiplied by this.
 const HOME_SHOT_FACTOR: f64 = 1.17;
 /// Each rating point of the attack against the other side's defence changes the shots by this share (as an exponent).
-const SHOT_RATE_PER_POINT: f64 = 0.034;
+const SHOT_RATE_PER_POINT: f64 = 0.024;
 /// Chance a shot is on target.
 const ON_TARGET: f64 = 0.36;
-/// Chance a shot on target is a goal, for a shooter and a goalkeeper of equal rating.
-const GOAL_PER_SHOT_ON_TARGET: f64 = 0.335;
-/// Each point of the shooter's finishing above the goalkeeper's rating changes that chance by this share (exponent).
-const FINISHING_EDGE_PER_POINT: f64 = 0.015;
+/// Chance a shot on target is a goal, for a shooter with the reference finishing against a keeper of the reference rating.
+const GOAL_PER_SHOT_ON_TARGET: f64 = 0.296;
+/// The finishing and goalkeeper rating that count as average.
+const REFERENCE_RATING: f64 = 70.0;
+/// Each point of the shooter's finishing above the reference changes that chance by this share (exponent), within
+/// `FINISHING_FACTOR_RANGE`. It is his own finishing, not the gap to the keeper: a striker in a weak league does not
+/// score like an elite one just because the keepers there are weak.
+const FINISHING_PER_POINT: f64 = 0.03;
+const FINISHING_FACTOR_RANGE: (f64, f64) = (0.6, 2.0);
+/// The same for each point the goalkeeper's rating is below the reference.
+const KEEPER_PER_POINT: f64 = 0.012;
+const KEEPER_FACTOR_RANGE: (f64, f64) = (0.8, 1.25);
+/// Each point of finishing multiplies a player's share of his side's shots by this (as an exponent): a 92 takes
+/// about 3 times the shots of a 70 in the same slot. Real stars take far more shots than a flat weight gives.
+const SHOTS_PER_FINISHING_POINT: f64 = 0.05;
+/// No player takes more than this share of his side's shots, however good he is and however weak the rest are (the
+/// best real strikers take about a quarter). Without a limit a lone good finisher in a weak side scored
+/// more than a goal a match.
+const MAX_SHOT_SHARE: f64 = 0.28;
+/// The same limit for the share of the assists.
+const MAX_ASSIST_SHARE: f64 = 0.45;
+/// The same for setting up goals, from creativity.
+const ASSISTS_PER_CREATIVITY_POINT: f64 = 0.05;
 /// A side that leads keeps this share of its later shots: teams sit back, which is also why draws are common.
 const LEADER_KEEPS_SHOOTING: f64 = 0.5;
 /// Chance a shot that is not scored wins a corner.
 const CORNER_PER_MISSED_SHOT: f64 = 0.45;
 /// Chance a goal is set up by a teammate.
-const GOAL_ASSISTED: f64 = 0.75;
+const GOAL_ASSISTED: f64 = 0.70;
 /// Share of the minutes a 90-minute period puts in the first half (real goals: 44.2%).
 const FIRST_HALF_SHARE: f64 = 0.42;
 
@@ -103,7 +122,8 @@ pub(super) fn simulate(input: &MatchInput, rng: &mut Rng) -> MatchReport {
         extra_time = Some(extra);
         shootout_score = (extra.0 == extra.1).then(|| shootout(rng));
     }
-    let detail = MatchDetail { home_possession: (home_possession * 100.0).round() as u8, events };
+    let lineups = [input.home, input.away].map(|t| t.players.map(|p| p.id));
+    let detail = MatchDetail { home_possession: (home_possession * 100.0).round() as u8, lineups, events };
     MatchReport { outcome: Outcome { full_time, extra_time, shootout: shootout_score }, detail: Some(detail) }
 }
 
@@ -122,7 +142,7 @@ fn other(side: Side) -> Side {
 }
 
 fn line_mean(team: &MatchTeam, line: Line) -> f64 {
-    let ratings: Vec<f64> = team.players.iter().filter(|p| p.line == line).map(|p| p.rating as f64).collect();
+    let ratings: Vec<f64> = team.players.iter().filter(|p| p.position.line() == line).map(|p| p.rating as f64).collect();
     if ratings.is_empty() { 0.0 } else { ratings.iter().sum::<f64>() / ratings.len() as f64 }
 }
 
@@ -199,17 +219,18 @@ impl Timeline<'_> {
             return;
         }
         let (me, them) = (team(self.input, side), team(self.input, other(side)));
-        let shooter = me.players[pick(&me.players, shot_weight, rng)];
+        let shooter = me.players[pick(&me.players, shot_weight, MAX_SHOT_SHARE, rng)];
         let on_target = rng.unit() < ON_TARGET;
         self.events.push(Event::Shot { minute, side, shooter: shooter.id, on_target });
         if on_target {
             let keeper = them.players[0];
-            let edge = shooter.finishing as f64 - keeper.rating as f64;
-            if rng.unit() < GOAL_PER_SHOT_ON_TARGET * (FINISHING_EDGE_PER_POINT * edge).exp() {
+            let finishing = (FINISHING_PER_POINT * (shooter.finishing as f64 - REFERENCE_RATING)).exp().clamp(FINISHING_FACTOR_RANGE.0, FINISHING_FACTOR_RANGE.1);
+            let keeping = (KEEPER_PER_POINT * (REFERENCE_RATING - keeper.rating as f64)).exp().clamp(KEEPER_FACTOR_RANGE.0, KEEPER_FACTOR_RANGE.1);
+            if rng.unit() < GOAL_PER_SHOT_ON_TARGET * finishing * keeping {
                 self.score[mine] += 1;
                 let assister = (rng.unit() < GOAL_ASSISTED).then(|| {
                     let weight = |p: &MatchPlayer| if p.id == shooter.id { 0.0 } else { assist_weight(p) };
-                    me.players[pick(&me.players, weight, rng)].id
+                    me.players[pick(&me.players, weight, MAX_ASSIST_SHARE, rng)].id
                 });
                 self.events.push(Event::Goal { minute, side, scorer: shooter.id, assister });
                 return;
@@ -236,35 +257,58 @@ impl Timeline<'_> {
     }
 }
 
-/// How likely a player is to take a shot: the shots per 90 minutes of his line (real Premier League figures), times
-/// his finishing.
+/// How likely a player is to take a shot: the shots per 90 minutes of his slot, raised by how well he finishes.
+// The three line averages (defenders 0.48, midfielders 1.45, attackers 2.81) are real Premier League 2014/15 figures
+// (research/game-features/match-simulation-methods.md). The split inside the midfield and attack is our own guess,
+// chosen so a 4-4-2's midfield still averages 1.45: wide and attacking midfielders shoot about twice as often as
+// central ones.
 fn shot_weight(p: &MatchPlayer) -> f64 {
-    let per_90 = match p.line {
-        Line::Goalkeeper => 0.0,
-        Line::Defence => 0.48,
-        Line::Midfield => 1.45,
-        Line::Attack => 2.81,
+    use Position::*;
+    let per_90 = match p.position {
+        _ if p.is_empty() => 0.0,
+        Gk => 0.0,
+        Lwb | Lb | Cb | Rb | Rwb => 0.48,
+        Cdm => 0.8,
+        Cm => 1.0,
+        Lm | Rm | Cam => 2.0,
+        Lw | Rw => 2.6,
+        Cf | St => 2.81,
     };
-    per_90 * p.finishing as f64
+    per_90 * (SHOTS_PER_FINISHING_POINT * p.finishing as f64).exp()
 }
 
-/// How likely a player is to set up a goal: the assists per 90 minutes of his line, times his creativity.
+/// How likely a player is to set up a goal: the assists per 90 minutes of his slot, raised by his creativity. The
+/// line averages (defenders 0.04, midfielders 0.12, attackers 0.11) are real; the split inside them is our own guess.
 fn assist_weight(p: &MatchPlayer) -> f64 {
-    let per_90 = match p.line {
-        Line::Goalkeeper => 0.0,
-        Line::Defence => 0.04,
-        Line::Midfield => 0.12,
-        Line::Attack => 0.11,
+    use Position::*;
+    let per_90 = match p.position {
+        _ if p.is_empty() => 0.0,
+        Gk => 0.0,
+        Cb => 0.03,
+        Lwb | Lb | Rb | Rwb => 0.06,
+        Cdm => 0.04,
+        Cm => 0.08,
+        Lm | Rm | Cam => 0.20,
+        Lw | Rw => 0.22,
+        Cf | St => 0.18,
     };
-    per_90 * p.creativity as f64
+    per_90 * (ASSISTS_PER_CREATIVITY_POINT * p.creativity as f64).exp()
 }
 
-/// The index of a player chosen at random with chances in proportion to `weight`. If every weight is 0, the first.
-fn pick(players: &[MatchPlayer; 11], weight: impl Fn(&MatchPlayer) -> f64, rng: &mut Rng) -> usize {
-    let total: f64 = players.iter().map(&weight).sum();
-    let mut left = rng.unit() * total;
-    for (i, p) in players.iter().enumerate() {
-        left -= weight(p);
+/// The index of a player chosen at random with chances in proportion to `weight`, except that nobody gets more than
+/// `max_share` of the chances (the rest is shared by the others in proportion). If every weight is 0, the first.
+fn pick(players: &[MatchPlayer; 11], weight: impl Fn(&MatchPlayer) -> f64, max_share: f64, rng: &mut Rng) -> usize {
+    let mut weights = players.each_ref().map(weight);
+    // Cutting one player down can push another over the limit, so go round a few times.
+    for _ in 0..3 {
+        let total: f64 = weights.iter().sum();
+        for w in weights.iter_mut().filter(|w| **w > max_share * total) {
+            *w = max_share / (1.0 - max_share) * (total - *w);
+        }
+    }
+    let mut left = rng.unit() * weights.iter().sum::<f64>();
+    for (i, w) in weights.iter().enumerate() {
+        left -= w;
         if left < 0.0 {
             return i;
         }
@@ -328,7 +372,7 @@ mod tests {
 
     #[test]
     fn forwards_score_far_more_than_defenders() {
-        let line_of = |id: u32| MatchTeam::flat(70).players[id as usize].line;
+        let line_of = |id: u32| MatchTeam::flat(70).players[id as usize].position.line();
         let (mut attackers, mut defenders) = (0, 0);
         for seed in 0..500 {
             for e in play(&input(70, 70, false), seed).1.events {
@@ -361,5 +405,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn nobody_takes_more_than_the_largest_share_of_the_shots() {
+        let mut team = MatchTeam::flat(60);
+        team.players[10].finishing = 99; // one star striker in a weak side
+        let mut rng = Rng::new(1);
+        let star = (0..5000).filter(|_| pick(&team.players, shot_weight, MAX_SHOT_SHARE, &mut rng) == 10).count() as f64 / 5000.0;
+        assert!((MAX_SHOT_SHARE - 0.03..MAX_SHOT_SHARE + 0.03).contains(&star), "the star took {star} of the shots");
+    }
+
+    #[test]
+    fn an_empty_slot_never_shoots_or_sets_up_a_goal() {
+        let mut team = MatchTeam::flat(70);
+        team.players[10] = MatchPlayer { id: 0, position: Position::St, rating: 0, finishing: 0, creativity: 0 };
+        assert_eq!((shot_weight(&team.players[10]), assist_weight(&team.players[10])), (0.0, 0.0));
+        let mut rng = Rng::new(2);
+        assert!((0..2000).all(|_| pick(&team.players, shot_weight, MAX_SHOT_SHARE, &mut rng) != 10));
     }
 }
