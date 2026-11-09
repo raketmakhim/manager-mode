@@ -105,6 +105,25 @@ pub struct Player {
     /// Experience points toward the next level, added by every match he plays (`development`). Game-only. Only the
     /// user's club levels up, so the others' bars are not used.
     pub xp: u16,
+    /// Playing, planning to retire at the end of the season, or retired (`retirement`). Game-only.
+    pub career: CareerStatus,
+}
+
+/// Where a player is in his career.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CareerStatus {
+    Playing,
+    /// Decided at the start of the season; he plays it out and retires when it ends.
+    Retiring,
+    /// Gone from his club for good. Stays in `World::players`, so his history and stats survive.
+    Retired,
+}
+
+impl Player {
+    /// His age in years in the season that starts in `year`, from a "1995-01-01" birth date; 25 if it cannot be read.
+    pub fn age(&self, year: u16) -> u8 {
+        self.birth_date.get(..4).and_then(|y| y.parse::<u16>().ok()).map_or(25, |born| year.saturating_sub(born).min(99) as u8)
+    }
 }
 
 pub struct Club {

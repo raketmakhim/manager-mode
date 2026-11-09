@@ -1,7 +1,7 @@
 //! The squad view: your players with how their ratings changed since the start of this season, and each one's overall over the seasons.
 use crate::{GREEN, RED};
 use eframe::egui::{self, Color32, RichText};
-use engine::{Attrs, ClubId, Player, PlayerId, Position, World, KEEPER, OUTFIELD, XP_PER_LEVEL};
+use engine::{Attrs, CareerStatus, ClubId, Player, PlayerId, Position, World, KEEPER, OUTFIELD, XP_PER_LEVEL};
 use std::collections::HashMap;
 
 /// A player's ratings at one moment.
@@ -77,7 +77,8 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, history: &History, sta
             for p in players {
                 let was = then.get(&p.id);
                 let position = p.positions.first().map_or(String::new(), |pos| pos.code().to_string());
-                if ui.selectable_label(false, &p.name).clicked() {
+                let name = if p.career == CareerStatus::Retiring { format!("{} (retiring)", p.name) } else { p.name.clone() };
+                if ui.selectable_label(false, name).clicked() {
                     state.open = Some(p.id);
                 }
                 ui.label(position);
@@ -112,6 +113,9 @@ fn player_page(ui: &mut egui::Ui, world: &World, p: &Player, history: &History) 
     ui.heading(&p.name);
     let positions: Vec<&str> = p.positions.iter().map(|pos| pos.code()).collect();
     ui.label(format!("{}   age {}", positions.join(", "), age(&p.birth_date, world.year).map_or("?".to_string(), |a| a.to_string())));
+    if p.career == CareerStatus::Retiring {
+        ui.colored_label(RED, "Planning to retire at the end of this season.");
+    }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label("Overall");

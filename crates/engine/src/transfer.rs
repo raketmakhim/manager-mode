@@ -1,9 +1,9 @@
 //! Transfers: players changing clubs in the summer between two seasons. One `Transfer` record covers every kind of
 //! move (club to club, a youngster arriving from nowhere, a player leaving the game), and a `Window` is all the
 //! transfers of one summer, ready to be applied to the `World`. Where the transfers come from is separate: the real
-//! moves between two editions of the data (`real_transfers`, read from the database by `source::plan_transfers`).
+//! moves between two editions of the data (`transfers_to_reality`, read from the database by `source::plan_transfers`).
 //! Design and data figures: `research/game-features/transfers.md`.
-use crate::model::{ClubId, Player, PlayerId, World};
+use crate::model::{CareerStatus, ClubId, Player, PlayerId, World};
 use std::collections::{HashMap, HashSet};
 
 /// How a player moves.
@@ -47,23 +47,44 @@ pub struct Membership {
     pub value: u32,
 }
 
-/// What changed for each player between two moments: moved clubs, left the game, or appeared. Players who stayed give
-/// nothing. Ordered by player id, so the same data always gives the same list.
-pub fn real_transfers(before: &HashMap<PlayerId, Membership>, after: &HashMap<PlayerId, Membership>) -> Vec<Transfer> {
-    let mut ids: Vec<PlayerId> = before.keys().chain(after.keys()).copied().collect();
+/// The transfers that bring the world's clubs to where the real data (`after`) has every player. A player is moved when
+/// his club in the world differs from his real new club, so a world that drifted (a club the data dropped for a
+/// year, a deal the user refused) is pulled back too. Exceptions:
+/// - a deal that involves `user`'s club only happens if the real player really changed club this summer (`before` to
+///   `after`), so a player the user kept or turned down is not taken or sent again unasked;
+/// - a player who has retired or is about to (`Player::career`) is left out;
+/// - a club that has nobody in `after` is one the data dropped (for a year or more): its players stay, whatever else
+///   the data says about them, so the club still has a team to play its matches.
+///
+/// Ordered by player id, so the same data always gives the same list.
+pub fn transfers_to_reality(world: &World, before: &HashMap<PlayerId, Membership>, after: &HashMap<PlayerId, Membership>, user: Option<ClubId>) -> Vec<Transfer> {
+    let covered: HashSet<ClubId> = after.values().filter_map(|m| m.club).collect();
+    let mut ids: Vec<PlayerId> = after.keys().copied().chain(world.players.keys().copied()).collect();
     ids.sort_unstable();
     ids.dedup();
     ids.into_iter()
         .filter_map(|player| {
-            let from = before.get(&player).and_then(|m| m.club);
-            let to = after.get(&player).and_then(|m| m.club);
+            let known = world.players.get(&player);
+            if known.is_some_and(|p| p.career != CareerStatus::Playing) {
+                return None; // retired (the data still lists him) or about to: he is not part of this summer's moves
+            }
+            let from = known.and_then(|p| p.club);
+            let (was, now) = (before.get(&player), after.get(&player));
+            let to = now.and_then(|m| m.club);
             if from == to {
                 return None;
             }
-            let loan = before.get(&player).is_some_and(|m| m.on_loan) || after.get(&player).is_some_and(|m| m.on_loan);
+            let really_moved = was.and_then(|m| m.club) != to;
+            let involves_user = user.is_some() && (from == user || to == user);
+            let dropped_club = from.is_some_and(|club| !covered.contains(&club));
+            if (involves_user && !really_moved) || dropped_club {
+                return None;
+            }
+            let loan = was.is_some_and(|m| m.on_loan) || now.is_some_and(|m| m.on_loan);
+            let value = now.or(was).map_or(0, |m| m.value);
             let (kind, fee) = match (from.is_some() && to.is_some(), loan) {
-                (true, false) => (TransferKind::Permanent, before[&player].value),
                 (_, true) => (TransferKind::Loan, 0),
+                (true, false) => (TransferKind::Permanent, value),
                 (false, false) => (TransferKind::Permanent, 0),
             };
             Some(Transfer { player, from, to, kind, fee })
@@ -82,7 +103,7 @@ pub struct Window {
 
 impl Window {
     /// Keeps the transfers that can happen in `world`: the player is where the transfer says, a club that is not in
-    /// the world counts as nowhere, a newcomer has his data and a club to join, and a player of `user`'s club who
+    /// the world counts as nowhere, a signing from nowhere is a free agent or a newcomer with his data, and a player of `user`'s club who
     /// would leave the game stays (the user is not asked about that, and losing a player unasked would be unfair).
     pub fn new(world: &World, transfers: Vec<Transfer>, newcomers: Vec<Player>, user: Option<ClubId>) -> Window {
         let newcomers: HashMap<PlayerId, Player> = newcomers.into_iter().map(|p| (p.id, p)).collect();
@@ -92,7 +113,7 @@ impl Window {
             .map(|t| Transfer { to: in_world(t.to), ..t })
             .filter(|t| match t.from {
                 Some(_) => world.players.get(&t.player).is_some_and(|p| p.club == t.from) && !(t.to.is_none() && t.from == user),
-                None => t.to.is_some() && !world.players.contains_key(&t.player) && newcomers.contains_key(&t.player),
+                None => t.to.is_some() && world.players.get(&t.player).map_or(newcomers.contains_key(&t.player), |p| p.club.is_none()),
             })
             .collect();
         Window { transfers, newcomers, declined: HashSet::new() }
@@ -161,31 +182,6 @@ mod tests {
         Membership { club, on_loan: false, value: 1_000_000 }
     }
 
-    fn map(entries: &[(PlayerId, Membership)]) -> HashMap<PlayerId, Membership> {
-        entries.iter().copied().collect()
-    }
-
-    #[test]
-    fn real_transfers_find_who_moved_left_or_arrived() {
-        let before = map(&[(1, at(Some(10))), (2, at(Some(10))), (3, at(Some(10))), (4, at(None))]);
-        let after = map(&[(1, at(Some(10))), (2, at(Some(20))), (4, at(Some(20))), (5, at(Some(20)))]);
-        let moves = real_transfers(&before, &after);
-        let summary: Vec<(PlayerId, Option<ClubId>, Option<ClubId>)> = moves.iter().map(|t| (t.player, t.from, t.to)).collect();
-        assert_eq!(summary, vec![(2, Some(10), Some(20)), (3, Some(10), None), (4, None, Some(20)), (5, None, Some(20))]);
-        assert_eq!(moves[0].fee, 1_000_000, "a permanent move between clubs costs his value");
-        assert!(moves[1..].iter().all(|t| t.fee == 0), "nothing is paid when there is no club on one side");
-    }
-
-    #[test]
-    fn a_loan_costs_nothing_whichever_way_it_goes() {
-        let loaned = Membership { on_loan: true, ..at(Some(20)) };
-        let out = real_transfers(&map(&[(1, at(Some(10)))]), &map(&[(1, loaned)]));
-        let back = real_transfers(&map(&[(1, loaned)]), &map(&[(1, at(Some(10)))]));
-        for t in out.iter().chain(&back) {
-            assert_eq!((t.kind, t.fee), (TransferKind::Loan, 0));
-        }
-    }
-
     /// Two clubs of eleven: club 1 has players 100 to 110, club 2 has 200 to 210.
     fn world() -> World {
         let mut w = World::new(15, 2014);
@@ -200,6 +196,76 @@ mod tests {
 
     fn newcomer(id: PlayerId, club: ClubId) -> Player {
         Player { club: Some(club), ..player(id, 70, &[crate::model::Position::St]) }
+    }
+
+    /// Where every player of the world is now, as a "before" and "after" the test can change.
+    fn memberships(w: &World) -> HashMap<PlayerId, Membership> {
+        w.players.values().map(|p| (p.id, at(p.club))).collect()
+    }
+
+    #[test]
+    fn transfers_to_reality_find_who_moved_left_or_arrived() {
+        let w = world();
+        let before = memberships(&w);
+        let mut after = before.clone();
+        after.insert(100, at(Some(2))); // moved
+        after.remove(&101); // gone from the data
+        after.insert(500, at(Some(2))); // new
+        let moves = transfers_to_reality(&w, &before, &after, None);
+        let summary: Vec<(PlayerId, Option<ClubId>, Option<ClubId>)> = moves.iter().map(|t| (t.player, t.from, t.to)).collect();
+        assert_eq!(summary, vec![(100, Some(1), Some(2)), (101, Some(1), None), (500, None, Some(2))]);
+        assert_eq!(moves[0].fee, 1_000_000, "a permanent move between clubs costs his value");
+        assert!(moves[1..].iter().all(|t| t.fee == 0), "nothing is paid when there is no club on one side");
+    }
+
+    #[test]
+    fn a_loan_costs_nothing_whichever_way_it_goes() {
+        let w = world();
+        let before = memberships(&w);
+        let mut after = before.clone();
+        after.insert(100, Membership { on_loan: true, ..at(Some(2)) });
+        let mut loaned_before = before.clone();
+        loaned_before.insert(200, Membership { on_loan: true, ..at(Some(2)) });
+        after.insert(200, at(Some(1)));
+        for t in transfers_to_reality(&w, &loaned_before, &after, None) {
+            assert_eq!((t.kind, t.fee), (TransferKind::Loan, 0));
+        }
+    }
+
+    #[test]
+    fn a_player_who_has_retired_or_is_about_to_is_not_moved_whatever_the_data_says() {
+        for career in [CareerStatus::Retired, CareerStatus::Retiring] {
+            let mut w = world();
+            w.players.get_mut(&100).unwrap().career = career;
+            let before = memberships(&w);
+            let mut after = before.clone();
+            after.insert(100, at(Some(2)));
+            assert!(transfers_to_reality(&w, &before, &after, None).is_empty(), "{career:?}");
+        }
+    }
+
+    #[test]
+    fn a_club_the_data_dropped_keeps_its_players_even_if_the_data_has_them_elsewhere() {
+        let w = world();
+        let before = memberships(&w);
+        let after: HashMap<PlayerId, Membership> = before.iter().filter(|(_, m)| m.club == Some(1)).map(|(&id, &m)| (id, m)).collect(); // nobody at club 2
+        let mut after = after;
+        after.insert(200, at(Some(1))); // the data has one of them at club 1
+        assert!(transfers_to_reality(&w, &before, &after, None).is_empty(), "club 2's players neither leave nor move");
+    }
+
+    #[test]
+    fn a_world_that_drifted_is_pulled_back_except_for_the_users_own_deals() {
+        let w = world();
+        let before = memberships(&w); // the data had player 100 at club 1, where the world has him
+        let mut after = before.clone();
+        after.insert(100, at(Some(2)));
+        let mut drifted = before.clone(); // the data had him at club 2 already, but the world kept him at club 1
+        drifted.insert(100, at(Some(2)));
+        let pulled = transfers_to_reality(&w, &drifted, &after, None);
+        assert_eq!(pulled.len(), 1, "another club's player is moved to where the data has him");
+        assert!(transfers_to_reality(&w, &drifted, &after, Some(1)).is_empty(), "a player the user kept is not sold unasked");
+        assert_eq!(transfers_to_reality(&w, &before, &after, Some(1)).len(), 1, "a real move is still offered");
     }
 
     #[test]

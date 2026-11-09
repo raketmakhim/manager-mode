@@ -5,7 +5,7 @@ use crate::attrs::{follow_real_change, Attr, Attrs};
 use crate::competition::{Competition, Rules};
 use crate::lineup::{Formation, Selection};
 use crate::model::*;
-use crate::transfer::{real_transfers, Membership, Window};
+use crate::transfer::{transfers_to_reality, Membership, Window};
 use rusqlite::{Connection, Result};
 use std::collections::HashMap;
 
@@ -106,6 +106,7 @@ fn player_from_row(r: &rusqlite::Row) -> Result<Player> {
         form: NEUTRAL_FORM,
         fitness: FULL_FITNESS,
         xp: 0,
+        career: CareerStatus::Playing,
     })
 }
 
@@ -152,18 +153,19 @@ fn read_ratings(conn: &Connection, version: i64) -> Result<HashMap<PlayerId, Rat
     rows.collect()
 }
 
-/// The summer's transfers, from how the real clubs of the players changed between this edition and the next: who
-/// moved, who left the game and who is new (with his real ratings). `user` is the user's club, whose players are
-/// never taken out of the game. Empty when there is no next edition. Make them with `World::make_transfers`, before
-/// `advance_ratings`.
+/// The summer's transfers: what brings every club to the players the next edition really has there (see
+/// `transfers_to_reality`), with the real ratings of the players who are new to the world. `user` is the user's club.
+/// Empty when there is no next edition. Make them with `World::make_transfers`, before `advance_ratings`.
 pub fn plan_transfers(conn: &Connection, world: &World, user: Option<ClubId>) -> Result<Window> {
     let next = world.edition + 1;
     if !editions(conn)?.contains(&next) {
         return Ok(Window::new(world, vec![], vec![], user));
     }
-    let transfers = real_transfers(&read_memberships(conn, world.edition)?, &read_memberships(conn, next)?);
-    let mut st = conn.prepare(&players_sql("r.fifa_version = ?2 AND r.player_id NOT IN (SELECT player_id FROM ratings WHERE fifa_version = ?1)"))?;
-    let newcomers = st.query_map([world.edition, next], player_from_row)?.collect::<Result<Vec<_>>>()?;
+    let (before, after) = (read_memberships(conn, world.edition)?, read_memberships(conn, next)?);
+    let transfers = transfers_to_reality(world, &before, &after, user);
+    let mut st = conn.prepare(&players_sql("r.fifa_version = ?1"))?;
+    let newcomers = st.query_map([next], player_from_row)?.collect::<Result<Vec<_>>>()?;
+    let newcomers = newcomers.into_iter().filter(|p| !world.players.contains_key(&p.id)).collect();
     Ok(Window::new(world, transfers, newcomers, user))
 }
 
@@ -344,5 +346,25 @@ mod tests {
         let r = conn.query_row(&sql, [], Ratings::from_row).unwrap();
         assert_eq!((r.overall, r.potential, r.wage, r.value, r.contract_until), (81, 85, 0, 9_000_000, Some(2026)));
         assert_eq!(r.attrs[Attr::Finishing], Some(70));
+    }
+
+    #[test]
+    fn over_several_summers_every_club_keeps_a_team_and_nobody_scores_absurdly() {
+        let Some(conn) = db() else { return };
+        let mut w = load_edition(&conn, 15).unwrap();
+        let mut rng = crate::Rng::new(5);
+        w.start_season(&mut rng);
+        for summer in 1..=3 {
+            w.play_season_to_end(&mut rng);
+            let window = plan_transfers(&conn, &w, None).unwrap();
+            w.start_next_season(&mut rng);
+            w.make_transfers(window);
+            assert!(advance_ratings(&conn, &mut w).unwrap());
+            let smallest = w.clubs.values().map(|c| c.squad.len()).min().unwrap();
+            assert!(smallest >= 11, "after summer {summer} a club has only {smallest} players: its matches would be against nobody");
+        }
+        w.play_season_to_end(&mut rng);
+        let top_scorer = w.players.keys().map(|&id| w.season_stats(id).goals).max().unwrap();
+        assert!(top_scorer < 65, "the top scorer has {top_scorer} goals");
     }
 }

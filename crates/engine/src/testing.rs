@@ -1,7 +1,7 @@
 //! Small builders for tests, so no test writes out a whole `Player` or `Club` by hand.
 use crate::attrs::Attr;
 use crate::lineup::{Formation, Selection};
-use crate::model::{Club, ClubId, CompetitionId, Player, PlayerId, Position, World};
+use crate::model::{CareerStatus, Club, ClubId, CompetitionId, Player, PlayerId, Position, World};
 
 /// A player with the given overall and listed positions; everything else is neutral.
 pub fn player(id: PlayerId, overall: u8, positions: &[Position]) -> Player {
@@ -20,6 +20,7 @@ pub fn player(id: PlayerId, overall: u8, positions: &[Position]) -> Player {
         form: 50,
         fitness: 100,
         xp: 0,
+        career: CareerStatus::Playing,
     }
 }
 

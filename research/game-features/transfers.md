@@ -26,8 +26,10 @@ Compared by player id between each edition and the next (numbers for 15 to 16 an
 ## 2. The design as built
 
 - `Transfer { player, from: Option<ClubId>, to: Option<ClubId>, kind, fee }`: one record for every move. No club before means a new player, no club after means he leaves the game.
-- `real_transfers(before, after)` is a pure function over two `Membership` maps (club, on loan, value); `source::plan_transfers` reads them from the database and also loads the new players with their real next ratings.
-- `Window::new` keeps only what can happen in this world: the player is at the club the transfer says (so a kept player is not moved by a later real move), a destination outside the world counts as nowhere, and a new player has data and a club.
+- `transfers_to_reality(world, before, after, user)` is a pure function over the world and two `Membership` maps (club, on loan, value). It moves every player to the club the next edition really has him at, so a world that drifted is pulled back. `source::plan_transfers` reads the maps from the database and loads the players new to the world with their real next ratings.
+- A club with nobody in the next edition is one the data dropped (Catania, Arles-Avignon...): its players stay, or the club would play its league with an empty team and every opponent would score five (found when a Lokomotiv striker had 81 goals in 2019/20). Tests: `a_club_the_data_dropped_keeps_its_players...` and a three-summer career test.
+- A deal that involves your club only happens if the player really moved that summer, so a player you kept or refused is not sold or signed unasked later.
+- `Window::new` keeps only what can happen in this world: the player is at the club the transfer says, a destination outside the world counts as nowhere, and a signing from nowhere is a free agent or a new player with data.
 - The user is asked only about moves between two clubs that involve their club. Their players who would leave the game (or move to a club we do not have) stay: nobody disappears from a squad unasked. New players who join their club arrive without a question.
 - `World::make_transfers(window)` applies every deal not declined, then sorts the touched squads best first. A declined deal leaves the player where he is. It runs before `advance_ratings`, which gives everyone the real next ratings.
 - Fee = his value for a permanent club to club move, 0 for a loan or a move with no club on one side. It is shown on the screen; no budget is changed yet.
@@ -38,5 +40,6 @@ Compared by player id between each edition and the next (numbers for 15 to 16 an
 - **The user's own bids, a transfer list, AI accepting or rejecting an offer**: the next step. The `Transfer` record and `make_transfers` are what a bid turns into.
 - **After FC 24 there are no real moves to replay**: a second model is needed (rule-based, by value and need). Make it a `TransferModel` enum with the real-moves one when it exists; today there is one source, so there is no enum yet.
 - **Contracts**: `contract_until` is overwritten by the real one each year. Expiry and renewals belong with the bids.
-- **A rejected deal stays rejected**: the player is no longer where the real data says, so later real moves of his are ignored. Upgrade if that looks wrong in play.
+- **A rejected deal stays rejected**: only deals that are real moves of that summer are offered to you, so a player you kept stays until the data moves him again.
+- **Dropped clubs freeze**: a club the data drops keeps its old squad (no transfers, ratings as they were) until the data has it again, then it is pulled back to the real squad.
 - Loans are treated as plain moves; the player does not go back by itself except through the real data.

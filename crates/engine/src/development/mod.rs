@@ -114,7 +114,7 @@ impl World {
             let (position, before, mut levels) = (p.positions[0], p.overall, 0u8);
             while p.xp >= XP_PER_LEVEL {
                 p.xp -= XP_PER_LEVEL;
-                let points = level_points(model, &Candidate { overall: p.overall, potential: p.potential, age: age(year, &p.birth_date) });
+                let points = level_points(model, &Candidate { overall: p.overall, potential: p.potential, age: p.age(year) });
                 apply(p, position, points, rng);
                 levels = levels.saturating_add(1);
             }
@@ -148,11 +148,6 @@ fn apply(p: &mut crate::model::Player, position: Position, points: f32, rng: &mu
 fn random_round(x: f32, rng: &mut Rng) -> i16 {
     let whole = x.floor();
     whole as i16 + (rng.unit() < (x - whole) as f64) as i16
-}
-
-/// His age in years at the start of the season `year`, from a "1995-01-01" birth date; 25 if it cannot be read.
-fn age(year: u16, birth_date: &str) -> u8 {
-    birth_date.get(..4).and_then(|y| y.parse::<u16>().ok()).map_or(25, |born| year.saturating_sub(born).min(99) as u8)
 }
 
 #[cfg(test)]
@@ -227,11 +222,6 @@ mod tests {
         let (below, over_by_2, over_by_14) = (at(90), at(78), at(66));
         assert!(below > over_by_2 && over_by_2 > over_by_14 && over_by_14 > 0.0, "{below} {over_by_2} {over_by_14}");
         assert!(over_by_2 > 0.6 * below, "a little over potential is a soft limit, not a wall: {over_by_2} against {below}");
-    }
-
-    #[test]
-    fn the_age_comes_from_the_birth_year() {
-        assert_eq!((age(2014, "1995-01-01"), age(2014, "garbage")), (19, 25));
     }
 
     #[test]

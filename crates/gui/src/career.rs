@@ -5,7 +5,7 @@ use crate::squad::{self, History};
 use crate::lineup;
 use crate::{competitions, fixtures, live, stats, transfers, RED};
 use eframe::egui;
-use engine::{advance_ratings, edition_label, editions, load_edition, plan_transfers, season_label, season_name, ClubId, CompetitionId, Connection, Rng, Side, Window, World};
+use engine::{advance_ratings, CareerStatus, edition_label, editions, load_edition, plan_transfers, season_label, season_name, ClubId, CompetitionId, Connection, Rng, Side, Window, World};
 
 /// How many levelled-up players the line next to the buttons names.
 const MAX_LEVELLED_NAMED: usize = 3;
@@ -74,6 +74,7 @@ impl Career {
         self.competition = None;
         self.view = View::Fixtures;
         world.start_season(&mut self.rng);
+        world.plan_retirements(&mut self.rng);
         self.history = Some(History::new(world, club, season_name(world.year)));
         self.squad = squad::State::default();
         self.lineup = lineup::State::default();
@@ -167,11 +168,14 @@ impl Career {
         }
     }
 
-    /// Makes the transfers, then promotion and relegation and the next season's fixtures. Says what happened to your
-    /// club.
+    /// Retires the players who planned to, makes the transfers, then promotion and relegation and the next season's
+    /// fixtures, and lets everyone decide on retiring this season. Says what happened to your club. Nothing in the
+    /// world changes until the point where nothing can fail any more except reading the new ratings.
     fn start_next_season(&mut self, club: ClubId, window: Window, conn: &Connection) {
         let Some(world) = &mut self.world else { return };
         let Some(moves) = world.start_next_season(&mut self.rng) else { return };
+        let leaving: Vec<String> = world.clubs[&club].squad.iter().map(|id| &world.players[id]).filter(|p| p.career == CareerStatus::Retiring).map(|p| p.name.clone()).collect();
+        let retired = world.retire_planned();
         let deals = (window.transfers().len(), window.questions_for(club).iter().filter(|&&i| !window.is_declined(i)).count());
         world.make_transfers(window);
         let ratings = match advance_ratings(conn, world) {
@@ -179,6 +183,9 @@ impl Career {
             Ok(false) => "No newer data: player ratings are unchanged.",
             Err(_) => "Could not read the new ratings.",
         };
+        // After the transfers and new ratings, so the newcomers decide too and the chance uses the new overall.
+        let planned = world.plan_retirements(&mut self.rng);
+        let planning: Vec<String> = planned.iter().filter(|(c, _)| *c == Some(club)).map(|(_, id)| world.players[id].name.clone()).collect();
         if let Some(history) = &mut self.history {
             history.start_season(world, club, season_name(world.year));
         }
@@ -190,7 +197,7 @@ impl Career {
             }
             _ => "Your club stays in its division.".to_string(),
         };
-        self.last_played = Some(format!("{} clubs changed division. {text} {} transfers, {} of them yours. {ratings}", moves.len(), deals.0, deals.1));
+        self.last_played = Some(format!("{} clubs changed division. {text} {} transfers, {} of them yours. {} players retired{}, {} plan to retire at the end of this season{}. {ratings}", moves.len(), deals.0, deals.1, retired.len(), yours(&leaving), planned.len(), yours(&planning)));
         self.competition = None;
     }
 
@@ -334,6 +341,15 @@ impl Career {
     }
 }
 
+/// " (yours: A, B)" naming your players in a list, or nothing when none of them is.
+fn yours(names: &[String]) -> String {
+    if names.is_empty() {
+        String::new()
+    } else {
+        format!(" (yours: {})", names.join(", "))
+    }
+}
+
 /// What the season screen shows.
 #[derive(PartialEq)]
 enum View {
@@ -394,6 +410,8 @@ mod tests {
             assert_ne!(world.players[&kept].club, Some(club), "the player you refused to sign did not arrive");
         }
         assert!(world.calendar_problems().is_empty());
+        assert!(world.players.values().filter(|p| p.career == CareerStatus::Retired).all(|p| p.club.is_none()), "a retired player has no club");
+        assert!(world.players.values().any(|p| p.career == CareerStatus::Retiring), "the new season starts with some planning to retire");
     }
 
     #[test]
