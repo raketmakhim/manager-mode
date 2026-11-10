@@ -59,8 +59,8 @@ impl World {
 
     /// Ends a finished season and starts the next: promotion and relegation, the year goes up by one, and every
     /// league and cup gets new fixtures. Returns the moves, or `None` if the season is not finished yet.
-    // shortcut: players keep this season's ratings, squads and contracts; next season's real ratings are not applied
-    // yet (that is the player-progression step).
+    // This moves the competitions on only: the summer's transfers, ratings and ageing are applied by the caller
+    // (`gui::Career`), because they need the database and the user's club.
     pub fn start_next_season(&mut self, rng: &mut Rng) -> Option<Vec<ClubMove>> {
         if !self.season_finished() {
             return None;

@@ -8,7 +8,7 @@
 //! - `lineup`: formations, and picking the best eleven for one.
 //! - `model`: the live game state (`World`, `Club`, `Player`...).
 //! - `outcome`: the result of a played match (full time, extra time, shootout).
-//! - `overall`: how overall is built from attributes, by position (weights; `overall_change`).
+//! - `overall`: how overall is built from attributes, by position (the weights).
 //! - `rating`: player match ratings behind one function, `rate` (a swappable `RatingModel`).
 //! - `retirement`: who decides at the start of a season to retire at its end (`RetirementModel`).
 //! - `rng`: the seeded random number generator every simulation takes.
@@ -53,7 +53,7 @@ pub use outcome::{Outcome, Side};
 pub use development::{AgeingModel, Development, ExperienceModel, XP_PER_LEVEL};
 pub use rating::RatingModel;
 pub use retirement::{chance as retirement_chance, RetirementModel};
-pub use overall::{overall_change, weights};
+pub use overall::weights;
 pub use rng::Rng;
 pub use sim::{simulate, simulate_shot_based, team_strength, DisciplineModel, FatigueModel, LiveMatch, SubstitutionError, TacticsError, SubstitutionModel, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS, Event, MatchDetail, MatchInput, MatchModel, MatchPlayer, MatchReport, MatchTeam, ScoringModel};
 pub use rusqlite::Connection;

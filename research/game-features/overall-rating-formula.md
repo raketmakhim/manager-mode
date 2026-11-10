@@ -44,7 +44,7 @@ As a **change**, not a total: when an attribute moves (XP, training), the new ov
 
 ## In the engine (done 2026-11-07)
 
-`engine/src/overall.rs` holds the weights (option C: as fitted, with every weight under 0.02 and every negative one dropped and the rest refitted, rounded to three decimals) and `overall_change(position, changes)`. The test `the_formula_predicts_the_real_change_in_overall_between_editions` predicts each player's FC 24 overall from his FIFA 23 overall and the change in his attributes, and needs at least 98% within one point.
+`engine/src/overall.rs` holds the weights (option C: as fitted, with every weight under 0.02 and every negative one dropped and the rest refitted, rounded to three decimals). The test `the_formula_predicts_the_real_change_in_overall_between_editions` predicts each player's FC 24 overall from his FIFA 23 overall and the weighted change in his attributes, and needs at least 98% within one point.
 
 Measured when the weights were generated (players with all 34 attributes and the same main position in both editions):
 

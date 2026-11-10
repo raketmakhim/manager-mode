@@ -194,9 +194,8 @@ fn read_memberships(conn: &Connection, version: i64) -> Result<HashMap<PlayerId,
 /// `age_club` uses it when a player really improved more than its own rules give him. Wage, value and contract are replaced by the real ones for everyone,
 /// and positions for everyone but the user's players.
 /// Returns false, and changes nothing, when there is no next edition (the data ends at FC 24).
-// shortcut: clubs keep their squads (transfers are made separately: `plan_transfers`), a player missing from the next edition keeps
-// his ratings, and the user's contracts are overwritten like everyone's. Upgrade when transfers and contract
-// renewals exist.
+// shortcut: a player missing from the next edition keeps his ratings, and the user's contracts are overwritten like
+// everyone's. Upgrade when contract renewals exist.
 pub fn advance_ratings(conn: &Connection, world: &mut World, own: Option<ClubId>) -> Result<bool> {
     let next = world.edition + 1;
     if !editions(conn)?.contains(&next) {

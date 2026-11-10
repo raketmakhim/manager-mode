@@ -229,18 +229,18 @@ pub fn weights(position: Position) -> &'static [(Attr, f32)] {
     }
 }
 
-/// How many overall points a player of this position gains or loses when his attributes change by `changes`
-/// (points of attribute, negative for a drop). Fractional: +2 finishing is about +0.4 for a striker.
-pub fn overall_change(position: Position, changes: &[(Attr, i8)]) -> f32 {
-    let weight = |attr: Attr| weights(position).iter().find(|(a, _)| *a == attr).map_or(0.0, |&(_, w)| w);
-    changes.iter().map(|&(attr, change)| weight(attr) * change as f32).sum()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::source::load_edition;
     use rusqlite::Connection;
+
+    /// How many overall points a player of this position gains or loses when his attributes change by `changes`
+    /// (points of attribute, negative for a drop). Fractional: +2 finishing is about +0.4 for a striker.
+    fn overall_change(position: Position, changes: &[(Attr, i8)]) -> f32 {
+        let weight = |attr: Attr| weights(position).iter().find(|(a, _)| *a == attr).map_or(0.0, |&(_, w)| w);
+        changes.iter().map(|&(attr, change)| weight(attr) * change as f32).sum()
+    }
 
     #[test]
     fn every_position_has_weights_that_are_positive_and_add_up_to_about_one() {
