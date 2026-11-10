@@ -195,13 +195,16 @@ pub fn live_match_stats(live: &LiveMatch) -> Vec<(PlayerId, PlayerStats)> {
 }
 
 impl World {
-    /// Adds a played match to its players' totals for this season and competition.
-    pub fn record_match(&mut self, competition: CompetitionId, detail: &MatchDetail, outcome: &Outcome) {
+    /// Adds a played match, played on `day` of the season, to its players' totals for this season and competition, and
+    /// tires them (`Player::tire`).
+    pub fn record_match(&mut self, competition: CompetitionId, day: u32, detail: &MatchDetail, outcome: &Outcome) {
+        let settings = self.fitness_settings;
         for (player, stats) in match_stats(detail, outcome, DEFAULT_RATING_MODEL) {
             self.stats.entry((player, self.year, competition)).or_default().add(&stats);
             self.last_match_xp.insert(player, stats.xp as u8);
             if let Some(p) = self.players.get_mut(&player) {
                 p.xp = p.xp.saturating_add(stats.xp as u16);
+                p.tire(day, stats.minutes, &settings);
             }
         }
     }
@@ -293,9 +296,9 @@ mod tests {
         assert_eq!(match_stats(&d, &Outcome::full_time(0, 0), RatingModel::Formula).len(), 21);
 
         let mut w = World::new(0, 2014);
-        w.record_match(7, &d, &Outcome::full_time(0, 0));
-        w.record_match(7, &d, &Outcome::full_time(0, 0));
-        w.record_match(8, &d, &Outcome::full_time(0, 0));
+        w.record_match(7, 7, &d, &Outcome::full_time(0, 0));
+        w.record_match(7, 7, &d, &Outcome::full_time(0, 0));
+        w.record_match(8, 7, &d, &Outcome::full_time(0, 0));
         assert_eq!(w.stats_for(Some(2014), Some(7)).iter().find(|r| r.0 == 12).unwrap().1.saves, 2);
         assert_eq!(w.stats_for(None, None).iter().find(|r| r.0 == 12).unwrap().1.saves, 3);
         assert!(w.stats_for(Some(2015), None).is_empty());

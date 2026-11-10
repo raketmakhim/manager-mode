@@ -1,6 +1,7 @@
 //! Playing fixtures: one match, one week, or everything up to a club's next match.
 use crate::attrs::Attr;
 use super::Competition;
+use crate::fitness::FitnessSettings;
 use crate::lineup::{rating_at, Selection};
 use crate::model::{ClubId, Player, Position, World};
 use crate::rng::Rng;
@@ -14,6 +15,7 @@ impl World {
     // thousands of seasons. The events of a match only feed the player stats; they are not kept. Keep them for the
     // matches that matter (the user's club, finals) once something shows them.
     pub fn play_fixture(&mut self, index: usize, rng: &mut Rng) {
+        self.rest_for(index);
         let f = &self.fixtures[index];
         let competition = &self.competitions[&f.competition];
         let input = self.match_input(f.home, f.away, competition, None);
@@ -24,17 +26,19 @@ impl World {
     /// Stores a played match's result and adds its events to the player stats.
     fn store_report(&mut self, index: usize, report: MatchReport) {
         if let Some(detail) = &report.detail {
-            self.record_match(self.fixtures[index].competition, detail, &report.outcome);
+            let f = &self.fixtures[index];
+            self.record_match(f.competition, f.day_number(), detail, &report.outcome);
         }
         self.fixtures[index].result = Some(report.outcome);
     }
 
     /// Plays every unplayed match of `week`, then draws any cup round that this completes.
     pub fn play_week(&mut self, week: u8, rng: &mut Rng) {
-        for index in 0..self.fixtures.len() {
-            if self.fixtures[index].week == week && self.fixtures[index].result.is_none() {
-                self.play_fixture(index, rng);
-            }
+        // In order of day, so a player's rest between two matches of the week counts the right days.
+        let mut todo: Vec<usize> = (0..self.fixtures.len()).filter(|&i| self.fixtures[i].week == week && self.fixtures[i].result.is_none()).collect();
+        todo.sort_by_key(|&i| self.fixtures[i].day);
+        for index in todo {
+            self.play_fixture(index, rng);
         }
         self.advance_cups(rng);
     }
@@ -74,6 +78,7 @@ impl World {
                 self.play_fixture(i, rng);
             }
         }
+        self.rest_for(next); // so the lineup shown and the match watched start from today's fitness
         Some(next)
     }
 
@@ -105,12 +110,12 @@ impl World {
         let slots = self.clubs[&club].formation.slots();
         let Selection { lineup, bench } = self.selection_of(club);
         let players = std::array::from_fn(|i| match lineup[i] {
-            Some(id) => match_player(&self.players[&id], slots[i], every_position),
+            Some(id) => match_player(&self.players[&id], slots[i], every_position, &self.fitness_settings),
             None => MatchPlayer::empty(slots[i]),
         });
         // A substitute is rated in his own main position and in every other, for the slot of whoever he replaces.
         let bench = bench.map(|place| match place {
-            Some(id) => match_player(&self.players[&id], self.players[&id].positions[0], true),
+            Some(id) => match_player(&self.players[&id], self.players[&id].positions[0], true, &self.fitness_settings),
             None => MatchPlayer::empty(Position::Cm),
         });
         MatchTeam { players, bench }
@@ -119,7 +124,7 @@ impl World {
 
 /// One lineup player for a match model. An attribute the data lacks (FIFA 15) counts as his rating in the slot. With
 /// `every_position` false only the rating in his slot is worked out and `ratings` repeats it.
-fn match_player(player: &Player, slot: Position, every_position: bool) -> MatchPlayer {
+fn match_player(player: &Player, slot: Position, every_position: bool, fitness: &FitnessSettings) -> MatchPlayer {
     let rating = rating_at(player, slot);
     let attr = |a: Attr| player.attrs[a].unwrap_or(rating);
     MatchPlayer {
@@ -131,6 +136,7 @@ fn match_player(player: &Player, slot: Position, every_position: bool) -> MatchP
         creativity: creativity(attr(Attr::Vision), attr(Attr::ShortPassing), attr(Attr::LongPassing), attr(Attr::Crossing), attr(Attr::Dribbling)),
         aggression: player.attrs[Attr::Aggression].unwrap_or(AVERAGE_AGGRESSION),
         stamina: attr(Attr::Stamina),
+        start_tiredness: fitness.start_tiredness(player.fitness),
     }
 }
 
@@ -157,6 +163,19 @@ mod tests {
         w.competitions.insert(1, Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), level: None, clubs });
         w.start_season(&mut Rng::new(1));
         w
+    }
+
+    #[test]
+    fn playing_a_match_tires_the_outfield_players_of_both_clubs_and_not_the_others() {
+        let mut w = world(4);
+        let index = w.play_next_match(1, &mut Rng::new(2)).unwrap();
+        let (home, away) = (w.fixtures[index].home, w.fixtures[index].away);
+        let outfield_fitness = |club: ClubId| w.clubs[&club].squad.iter().map(|id| &w.players[id]).filter(|p| p.positions[0] != Position::Gk).map(|p| p.fitness).collect::<Vec<_>>();
+        for club in [home, away] {
+            assert!(outfield_fitness(club).iter().all(|&f| f < 100), "club {club} played");
+        }
+        let keeper = w.clubs[&home].squad.iter().map(|id| &w.players[id]).find(|p| p.positions[0] == Position::Gk).unwrap();
+        assert_eq!(keeper.fitness, 100, "a goalkeeper does not tire");
     }
 
     #[test]

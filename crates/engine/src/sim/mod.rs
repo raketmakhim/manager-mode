@@ -23,6 +23,7 @@ mod substitution;
 pub use cheap::team_strength;
 pub use discipline::DisciplineModel;
 pub use fatigue::FatigueModel;
+pub(crate) use fatigue::{match_tiredness, RATING_LOSS_AT_SPENT, REFERENCE_STAMINA};
 pub use scoring::ScoringModel;
 pub use substitution::SubstitutionModel;
 pub use shot_based::{simulate_with as simulate_shot_based, LiveMatch, Parts as ShotBasedParts, SubstitutionError, TacticsError, DEFAULT_PARTS as DEFAULT_SHOT_BASED_PARTS};
@@ -65,6 +66,9 @@ pub struct MatchPlayer {
     pub aggression: u8,
     /// How long he keeps running, 0-99: decides how fast he tires.
     pub stamina: u8,
+    /// How tired he is at kick-off, 0 (fresh) to 1: a player who is not fully fit starts the match already tired
+    /// (`FatigueModel`; `fitness` turns fitness into this).
+    pub start_tiredness: f64,
 }
 
 /// The aggression of a player whose data lacks the attribute: about the mean outfield player.
@@ -84,7 +88,7 @@ pub struct MatchTeam {
 impl MatchPlayer {
     /// Nobody in a slot: id 0, no rating, never shoots, assists or fouls.
     pub fn empty(position: Position) -> MatchPlayer {
-        MatchPlayer { id: 0, position, rating: 0, ratings: [0; Position::COUNT], finishing: 0, creativity: 0, aggression: 0, stamina: 0 }
+        MatchPlayer { id: 0, position, rating: 0, ratings: [0; Position::COUNT], finishing: 0, creativity: 0, aggression: 0, stamina: 0, start_tiredness: 0.0 }
     }
 
     /// True for a lineup slot nobody fills (a club with fewer than eleven players): it never shoots, assists or fouls.
@@ -104,7 +108,7 @@ impl MatchTeam {
     pub(crate) fn flat(rating: u8) -> MatchTeam {
         use crate::lineup::Formation;
         let slots = Formation::FourFourTwo.slots();
-        let player = |id: PlayerId, position| MatchPlayer { id, position, rating, ratings: [rating; Position::COUNT], finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION, stamina: rating };
+        let player = |id: PlayerId, position| MatchPlayer { id, position, rating, ratings: [rating; Position::COUNT], finishing: rating, creativity: rating, aggression: AVERAGE_AGGRESSION, stamina: rating, start_tiredness: 0.0 };
         let bench_positions = [Position::Gk, Position::Cb, Position::Rb, Position::Cm, Position::Cam, Position::Lw, Position::St];
         MatchTeam { players: std::array::from_fn(|i| player(i as PlayerId + 1, slots[i])), bench: std::array::from_fn(|i| player(100 + i as PlayerId, bench_positions[i])) }
     }

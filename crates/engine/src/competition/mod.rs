@@ -131,6 +131,7 @@ impl World {
     /// Replaces `fixtures` with a full season for every league. Cups are skipped: a cup's rounds can only be
     /// drawn after the previous one is played, so `advance_cups` adds them during the season.
     pub fn generate_fixtures(&mut self) {
+        self.rest_for_summer(); // a new season's fixtures: the days start again from the first week
         self.fixtures = self
             .competitions
             .values()

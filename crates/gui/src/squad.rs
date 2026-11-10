@@ -1,4 +1,5 @@
 //! The squad view: your players with how their ratings changed since the start of this season, and each one's overall over the seasons.
+use crate::lineup::fitness_colour;
 use crate::{GREEN, RED};
 use eframe::egui::{self, Color32, RichText};
 use engine::{Attrs, CareerStatus, ClubId, Player, PlayerId, Position, World, KEEPER, OUTFIELD, XP_PER_LEVEL};
@@ -62,7 +63,7 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, history: &History, sta
         return;
     }
     ui.label(format!("Changes are since the start of {}. Open a player for his overall over the seasons.", history.season()));
-    ui.label(format!("XP: every match gives 1 to 10 (less for a high overall). At {XP_PER_LEVEL} XP a player levels up and the rest stays in his bar. Last: XP of his last match."));
+    ui.label(format!("XP: every match gives 1 to 10 (less for a high overall). At {XP_PER_LEVEL} XP a player levels up and the rest stays in his bar. Last: XP of his last match. Fit: his fitness (green above 75, yellow 60 to 75, orange 45 to 59, red below); playing lowers it, rest between matches brings it back, most of it on the first day."));
     ui.add_space(6.0);
     let then = &history.season_start;
 
@@ -70,7 +71,7 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, history: &History, sta
     players.sort_by_key(|p| std::cmp::Reverse(p.overall));
     egui::ScrollArea::both().id_salt("squad_table").show(ui, |ui| {
         egui::Grid::new("squad").striped(true).min_col_width(40.0).show(ui, |ui| {
-            for h in ["Player", "Pos", "Age", "Overall", "", "Potential", "", "Apps", "Goals", "Assists", "Rating", "XP", "Last"] {
+            for h in ["Player", "Pos", "Age", "Overall", "", "Potential", "", "Apps", "Goals", "Assists", "Rating", "Fit", "XP", "Last"] {
                 ui.label(RichText::new(h).strong());
             }
             ui.end_row();
@@ -92,6 +93,7 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, history: &History, sta
                     ui.label(n.to_string());
                 }
                 ui.label(stats.average_rating().map_or("-".to_string(), |r| format!("{r:.1}")));
+                ui.label(RichText::new(format!("{}%", p.fitness)).color(fitness_colour(p.fitness)));
                 xp_bar(ui, p.xp);
                 ui.label(world.last_match_xp.get(&p.id).map_or("-".to_string(), |xp| xp.to_string()));
                 ui.end_row();
@@ -125,6 +127,9 @@ fn player_page(ui: &mut egui::Ui, world: &World, p: &Player, history: &History) 
         ui.label("Potential");
         ui.label(RichText::new(p.potential.to_string()).heading());
         change_label(ui, then.map(|w| p.potential as i32 - w.potential as i32));
+        ui.add_space(16.0);
+        ui.label("Fitness");
+        ui.label(RichText::new(format!("{}%", p.fitness)).color(fitness_colour(p.fitness)).heading());
         ui.add_space(16.0);
         ui.label("XP");
         xp_bar(ui, p.xp);

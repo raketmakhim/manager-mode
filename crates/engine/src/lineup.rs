@@ -175,11 +175,16 @@ pub fn rating_at(player: &Player, slot: Position) -> u8 {
 // shortcut: this greedy pick is not always the best total assignment; upgrade to an optimal assignment (Hungarian
 // method) if lineups look wrong.
 pub fn pick_lineup(squad: &[&Player], formation: Formation) -> Lineup {
+    pick_by(squad, formation, rating_at)
+}
+
+/// `pick_lineup` ranking each player in each slot by `rate`.
+fn pick_by(squad: &[&Player], formation: Formation, rate: impl Fn(&Player, Position) -> u8) -> Lineup {
     let slots = formation.slots();
     let mut pairs: Vec<(u8, usize, PlayerId, usize)> = vec![]; // (rating, index in squad, player id, slot)
     for (i, player) in squad.iter().enumerate() {
         for (slot, &position) in slots.iter().enumerate() {
-            pairs.push((rating_at(player, position), i, player.id, slot));
+            pairs.push((rate(player, position), i, player.id, slot));
         }
     }
     pairs.sort_by_key(|&(rating, _, id, slot)| (std::cmp::Reverse(rating), id, slot));
@@ -332,7 +337,9 @@ impl World {
     pub fn picked_selection(&self, club: ClubId) -> Selection {
         let c = &self.clubs[&club];
         let squad: Vec<&Player> = c.squad.iter().map(|p| &self.players[p]).collect();
-        let lineup = pick_lineup(&squad, c.formation);
+        // A player who is not fully fit starts the match tired, so the game picks by what he is worth today: the
+        // better of two close players rests when he is worn out.
+        let lineup = pick_by(&squad, c.formation, |p, slot| rating_at(p, slot).saturating_sub(self.rating_cost_of_fitness(p.fitness)));
         Selection { lineup, bench: pick_bench(&squad, &lineup) }
     }
 
@@ -350,6 +357,19 @@ mod tests {
     use crate::attrs::Attr;
     use crate::testing::{club, player, player_with_attrs};
     use Position::*;
+
+    #[test]
+    fn the_game_rests_a_worn_out_player_when_a_fresh_one_is_nearly_as_good() {
+        let mut w = crate::model::World::new(15, 2014);
+        crate::testing::add_club_with_eleven(&mut w, 1, 1, 60);
+        let mut star = player(999, 61, &[Cm]);
+        star.club = Some(1);
+        w.players.insert(999, star);
+        w.clubs.get_mut(&1).unwrap().squad.push(999);
+        assert!(w.picked_selection(1).lineup.contains(&Some(999)), "fully fit, the 61 plays");
+        w.players.get_mut(&999).unwrap().fitness = 30;
+        assert!(!w.picked_selection(1).lineup.contains(&Some(999)), "worn out, he rests for a 60");
+    }
 
     #[test]
     fn every_formation_is_eleven_players_in_rows_with_the_goalkeeper_alone_first() {

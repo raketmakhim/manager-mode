@@ -105,6 +105,9 @@ fn player_from_row(r: &rusqlite::Row) -> Result<Player> {
         value: ratings.value,
         form: NEUTRAL_FORM,
         fitness: FULL_FITNESS,
+        fitness_day: 0,
+        matches_in_a_row: 0,
+        last_match_day: 0,
         xp: 0,
         career: CareerStatus::Playing,
     })

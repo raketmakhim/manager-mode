@@ -2,6 +2,7 @@
 //!
 //! - `attrs`: the player attributes (`Attr`, `Attrs`) and which ones outfield players and keepers have.
 //! - `competition`: leagues and cups as lists of stages, schedules and the weekly match limit.
+//! - `fitness`: how playing tires players and rest brings them back between matches.
 //! - `history`: reading real player history out of history.db.
 //! - `lineup`: formations, and picking the best eleven for one.
 //! - `model`: the live game state (`World`, `Club`, `Player`...).
@@ -17,6 +18,7 @@
 mod attrs;
 mod competition;
 mod development;
+mod fitness;
 mod history;
 mod lineup;
 mod model;
@@ -38,6 +40,7 @@ pub use competition::{
     TOP_FIVE_LEAGUES,
 };
 pub use history::{career, edition_label, player_name, search, season_label, season_name, Hit, Snapshot};
+pub use fitness::FitnessSettings;
 pub use lineup::{
     familiarity, pick_bench, pick_lineup, rating_at, Bench, Familiarity, Formation, Lineup, Selection, Spot, BENCH_SIZE,
 };

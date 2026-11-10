@@ -360,7 +360,7 @@ mod tests {
     use engine::{Formation, MatchInput, MatchPlayer, MatchTeam, Position, ShotBasedParts, DEFAULT_SHOT_BASED_PARTS};
 
     fn team(first_id: u32) -> MatchTeam {
-        let player = |id, position| MatchPlayer { id, position, rating: 70, ratings: [70; Position::COUNT], finishing: 70, creativity: 70, aggression: 60, stamina: 70 };
+        let player = |id, position| MatchPlayer { id, position, rating: 70, ratings: [70; Position::COUNT], finishing: 70, creativity: 70, aggression: 60, stamina: 70, start_tiredness: 0.0 };
         let slots = Formation::FourFourTwo.slots();
         MatchTeam { players: std::array::from_fn(|i| player(first_id + i as u32, slots[i])), bench: std::array::from_fn(|i| player(first_id + 20 + i as u32, slots[i])) }
     }

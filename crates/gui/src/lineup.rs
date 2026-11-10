@@ -8,6 +8,8 @@ use engine::{
 };
 
 const AMBER: Color32 = Color32::from_rgb(230, 170, 50);
+const YELLOW: Color32 = Color32::from_rgb(225, 205, 60);
+const ORANGE: Color32 = Color32::from_rgb(235, 130, 40);
 const CARD: Vec2 = Vec2::new(118.0, 58.0);
 const SPACING: f32 = 6.0;
 /// The most players in one row of any formation, which sets the width of the pitch.
@@ -110,18 +112,19 @@ fn pitch(ui: &mut egui::Ui, world: &World, club: ClubId, selection: &Selection, 
             for (i, &position) in row.iter().enumerate() {
                 let slot = first + i;
                 let player = selection.lineup[slot].map(|id| &world.players[&id]);
-                let (text, colour) = match player {
-                    None => (format!("{}\n(empty)", position.code()), Color32::GRAY),
+                let text = match player {
+                    None => coloured(ui, &[(format!("{}\n(empty)", position.code()), Color32::GRAY)]),
                     Some(p) => {
                         let mut rating = format!("{}", rating_at(p, position));
                         if let Some(w) = waiting {
                             rating += &format!("   -> {}", rating_at(w, position));
                         }
-                        (format!("{}\n{}\n{}", position.code(), short_name(&p.name), rating), familiarity_colour(familiarity(p, position)))
+                        let colour = familiarity_colour(familiarity(p, position));
+                        coloured(ui, &[(format!("{}\n{}\n{}  ", position.code(), short_name(&p.name), rating), colour), (format!("fit {}%", p.fitness), fitness_colour(p.fitness))])
                     }
                 };
                 let selected = state.selected == Some(Spot::Starter(slot));
-                if ui.add(egui::Button::new(RichText::new(text).color(colour)).min_size(CARD).selected(selected)).clicked() {
+                if ui.add(egui::Button::new(text).min_size(CARD).selected(selected)).clicked() {
                     clicked = Some(Spot::Starter(slot));
                 }
             }
@@ -140,8 +143,8 @@ fn side_lists(ui: &mut egui::Ui, world: &World, club: ClubId, selection: &Select
     };
     let mut clicked = None;
     let mut row = |ui: &mut egui::Ui, spot: Spot, player: Option<&Player>| {
-        let (text, colour) = match player {
-            None => ("(empty)".to_string(), Color32::GRAY),
+        let text = match player {
+            None => coloured(ui, &[("(empty)".to_string(), Color32::GRAY)]),
             Some(p) => {
                 let mut text = format!("{:3}  {}  ({})", p.overall, p.name, positions_text(p));
                 let mut colour = ui.visuals().text_color();
@@ -149,11 +152,11 @@ fn side_lists(ui: &mut egui::Ui, world: &World, club: ClubId, selection: &Select
                     text += &format!("   -> {} as {}", rating_at(p, position), position.code());
                     colour = familiarity_colour(familiarity(p, position));
                 }
-                (text, colour)
+                coloured(ui, &[(format!("{text}  "), colour), (format!("fit {}%", p.fitness), fitness_colour(p.fitness))])
             }
         };
         let selected = state.selected == Some(spot);
-        if ui.add(egui::Button::new(RichText::new(text).color(colour)).selected(selected)).clicked() {
+        if ui.add(egui::Button::new(text).selected(selected)).clicked() {
             clicked = Some(spot);
         }
     };
@@ -193,6 +196,26 @@ fn familiarity_colour(familiarity: Familiarity) -> Color32 {
 /// "ST, LW".
 fn positions_text(p: &Player) -> String {
     p.positions.iter().map(|pos| pos.code()).collect::<Vec<_>>().join(", ")
+}
+
+/// The colour of a fitness (0-100): green above 75, yellow 60 to 75, orange 45 to 59, red below 45.
+pub(crate) fn fitness_colour(fitness: u8) -> Color32 {
+    match fitness {
+        76.. => GREEN,
+        60..=75 => YELLOW,
+        45..=59 => ORANGE,
+        _ => RED,
+    }
+}
+
+/// Pieces of text, each in its own colour, as one button label.
+fn coloured(ui: &egui::Ui, parts: &[(String, Color32)]) -> egui::text::LayoutJob {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let mut job = egui::text::LayoutJob::default();
+    for (text, colour) in parts {
+        job.append(text, 0.0, egui::TextFormat::simple(font.clone(), *colour));
+    }
+    job
 }
 
 /// "Marcus Rashford" becomes "M. Rashford"; a single name stays as it is.

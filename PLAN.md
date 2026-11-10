@@ -68,7 +68,7 @@ Built in `crates/engine/src/model.rs`; everything points at everything else by i
 - **Done when**: user can buy/sell, and the budget cannot go invalid
 
 ### M5 - Progression and multi-season
-- End-of-season: aging, development toward potential, decline, retirement, new youngsters. Done so far: match XP and levels for the user's club (`development`), retirement decided at the start of each season and made at its end (`retirement`); not yet: simulated ageing and decline after FC 24, new youngsters
+- End-of-season: aging, development toward potential, decline, retirement, new youngsters. Done so far: match XP and levels for the user's club (`development`), retirement decided at the start of each season and made at its end (`retirement`); fitness carried between matches (`fitness`: matches tire players, rest brings it back with a falling curve, tired players start tired and the automatic lineup rests them); not yet: injuries, simulated ageing and decline after FC 24, new youngsters
 - Board objectives and a sack/keep result
 - Save/load (save records which dataset it started from)
 - Historical growth: real ratings as a target curve, simulated growth when diverged

@@ -1,6 +1,8 @@
 //! Tiring during a match: how tired a player is after some minutes on the pitch, and what that does to his rating in
 //! his slot. A fatigue model is a pure function from the player, the minutes he has played and his side's share of the
-//! ball; the match model calls it through `FatigueModel`. Between matches (rest, fitness, injuries) is not here.
+//! ball; the match model calls it through `FatigueModel`. A player who is not fully fit (`MatchPlayer::start_tiredness`)
+//! starts already tired. Rest between matches, and how fitness becomes that tiredness, are in `fitness`; injuries do not
+//! exist yet.
 //! Adding a model: a `FatigueModel` variant and an arm in `tiredness`; the contract tests below run for it through
 //! `FatigueModel::ALL`.
 //!
@@ -37,14 +39,14 @@ pub const DEFAULT_FATIGUE_MODEL: FatigueModel = FatigueModel::ByStamina;
 /// Tiredness (0 fresh to 1 spent) of a midfielder with the reference stamina who has played 90 minutes with half the ball.
 const TIRED_AT_90: f64 = 0.5;
 /// The stamina that counts as average.
-const REFERENCE_STAMINA: f64 = 70.0;
+pub(crate) const REFERENCE_STAMINA: f64 = 70.0;
 /// Each stamina point above the reference cuts tiredness by this share (as an exponent): a 90 tires about 0.6 times
 /// as fast as a 70, a 50 about 1.6 times.
 const STAMINA_PER_POINT: f64 = 0.025;
 /// Tiredness grows with the minutes played to this power: slowly at first and faster late, as real running does.
 const BUILD_UP: f64 = 1.5;
 /// Rating points a player loses when fully spent.
-const RATING_LOSS_AT_SPENT: f64 = 10.0;
+pub(crate) const RATING_LOSS_AT_SPENT: f64 = 10.0;
 /// Each 10 points of ball share below half adds this share to the tiredness (and above half takes it off): the side
 /// without the ball does more of the sprinting. Modest, since total distance is the same whoever has the ball.
 const NO_BALL_EXTRA_PER_TEN_POINTS: f64 = 0.06;
@@ -70,9 +72,16 @@ pub(super) fn tiredness(model: FatigueModel, player: &MatchPlayer, minutes_on: u
             let stamina = (STAMINA_PER_POINT * (REFERENCE_STAMINA - player.stamina as f64)).exp();
             let ball = 1.0 + NO_BALL_EXTRA_PER_TEN_POINTS * (0.5 - ball_share) * 10.0;
             let run = (minutes_on as f64 / 90.0).powf(BUILD_UP);
-            (TIRED_AT_90 * position_factor(player.position) * stamina * ball * run).clamp(0.0, 1.0)
+            (player.start_tiredness + TIRED_AT_90 * position_factor(player.position) * stamina * ball * run).clamp(0.0, 1.0)
         }
     }
+}
+
+/// How tired (0 to 1) a player of this position and stamina is after playing `minutes` with an even share of the ball,
+/// starting fresh. `fitness` turns it into lost fitness with the same tiring as in the match, so the two cannot disagree.
+pub(crate) fn match_tiredness(position: Position, stamina: u8, minutes: u16) -> f64 {
+    let player = MatchPlayer { position, stamina, ..MatchPlayer::empty(position) };
+    tiredness(DEFAULT_FATIGUE_MODEL, &player, minutes.min(u8::MAX as u16) as u8, 0.5)
 }
 
 /// The player's rating in his slot (0-99) once tired.
@@ -116,6 +125,17 @@ mod tests {
             let by_minute: Vec<f64> = (0..=120).map(|m| tiredness(model, &p, m, 0.5)).collect();
             assert!(by_minute.windows(2).all(|w| w[0] <= w[1]), "{model:?}");
         }
+    }
+
+    #[test]
+    fn a_player_who_is_not_fully_fit_starts_tired_but_only_in_the_models_that_tire_players() {
+        let fit = player(Position::Cm, 70);
+        let worn = MatchPlayer { start_tiredness: 0.3, ..fit };
+        assert_eq!(tiredness(FatigueModel::ByStamina, &fit, 0, 0.5), 0.0);
+        assert!(tiredness(FatigueModel::ByStamina, &worn, 0, 0.5) > 0.2);
+        assert!(tired_rating(FatigueModel::ByStamina, &worn, 0, 0.5) < worn.rating);
+        assert!(tiredness(FatigueModel::ByStamina, &worn, 90, 0.5) > tiredness(FatigueModel::ByStamina, &fit, 90, 0.5));
+        assert_eq!(tiredness(FatigueModel::None, &worn, 90, 0.5), 0.0);
     }
 
     #[test]

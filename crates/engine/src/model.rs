@@ -1,6 +1,7 @@
 //! The live game state. Everything points at everything else by id, so the whole `World` is plain data
 //! (easy to save, and no borrowing puzzles). Unlike `Snapshot`, which is one read-only row of history,
 //! a `Player` here is the player right now and the simulation changes it.
+use crate::fitness::FitnessSettings;
 use crate::attrs::Attrs;
 use crate::competition::Competition;
 use crate::lineup::{Formation, Selection};
@@ -100,8 +101,15 @@ pub struct Player {
     pub value: u32,
     /// 0-100. Game-only, not in the data.
     pub form: u8,
-    /// 0-100. Game-only, not in the data.
+    /// 0-100 as of `fitness_day`: matches lower it, rest brings it back (`fitness`). Game-only, not in the data.
     pub fitness: u8,
+    /// The day of the season (`Fixture::day_number`) `fitness` was worked out for.
+    pub fitness_day: u32,
+    /// Matches he has played in a row, each within a week of the one before (`fitness`): the longer the run, the
+    /// more his wear. Game-only.
+    pub matches_in_a_row: u16,
+    /// The day of the season of the last match of that run.
+    pub last_match_day: u32,
     /// Experience points toward the next level, added by every match he plays (`development`). Game-only. Only the
     /// user's club levels up, so the others' bars are not used.
     pub xp: u16,
@@ -196,6 +204,12 @@ pub struct Fixture {
 }
 
 impl Fixture {
+    /// Which day of the season it is played: a week is seven days from its Saturday, so this counts days and puts
+    /// matches in order. The first week's Saturday is day 7.
+    pub fn day_number(&self) -> u32 {
+        self.week as u32 * 7 + self.day.days_after_saturday() as u32
+    }
+
     /// True if the club plays in this match, at home or away.
     pub fn involves(&self, club: ClubId) -> bool {
         self.home == club || self.away == club
@@ -238,6 +252,8 @@ pub struct World {
     pub stats: BTreeMap<(PlayerId, u16, CompetitionId), PlayerStats>,
     /// The experience points each player got in the last match he played.
     pub last_match_xp: BTreeMap<PlayerId, u8>,
+    /// The numbers behind tiredness and rest between matches; change them to tune (`fitness`).
+    pub fitness_settings: FitnessSettings,
 }
 
 impl World {
@@ -252,6 +268,7 @@ impl World {
             fixtures: vec![],
             stats: BTreeMap::new(),
             last_match_xp: BTreeMap::new(),
+            fitness_settings: FitnessSettings::default(),
         }
     }
 }

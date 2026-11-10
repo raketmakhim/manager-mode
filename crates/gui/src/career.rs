@@ -90,6 +90,7 @@ impl Career {
             None => "Nothing left to play.".to_string(),
             Some(index) => Self::result_text(world, index),
         });
+        world.rest_to_next_match(club);
         self.add_level_ups(club);
     }
 
@@ -136,6 +137,7 @@ impl Career {
         world.finish_live_match(index, live, &mut self.rng);
         self.last_played = Some(Self::result_text(world, index));
         if let Some(club) = self.club {
+            world.rest_to_next_match(club);
             self.add_level_ups(club);
         }
     }
@@ -383,6 +385,9 @@ mod tests {
         let name = world.clubs[&club].name.clone();
         c.play_next_match(club);
         assert!(c.last_played.as_deref().is_some_and(|t| t.contains(&name)));
+        let world = c.world.as_ref().unwrap();
+        let next = world.fixtures.iter().filter(|f| f.result.is_none() && f.involves(club)).map(|f| f.day_number()).min().unwrap();
+        assert!(world.clubs[&club].squad.iter().all(|id| world.players[id].fitness_day == next), "after a match your squad is rested to the day of its next one");
     }
 
     #[test]
