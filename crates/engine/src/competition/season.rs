@@ -141,7 +141,7 @@ mod tests {
         assert!(w.fixtures.iter().all(|f| f.result.is_none()) && !w.fixtures.is_empty());
         assert!(!w.season_finished());
         assert!(w.calendar_problems().is_empty());
-        assert_eq!(w.competitions.values().filter(|c| c.is_cup()).count(), 1, "one cup per country, rebuilt");
+        assert_eq!(w.competitions.values().filter(|c| c.is_cup()).count(), 2, "a cup and a league cup per country, rebuilt");
     }
 
     #[test]

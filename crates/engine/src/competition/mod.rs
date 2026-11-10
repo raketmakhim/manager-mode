@@ -21,7 +21,7 @@ pub use pairing::round_robin;
 pub use season::ClubMove;
 pub use standings::{standings, TableRow};
 
-use crate::model::{ClubId, CompetitionId, World};
+use crate::model::{ClubId, CompetitionId, Day, World};
 use crate::rng::Rng;
 use crate::sim::MatchModel;
 
@@ -66,6 +66,9 @@ pub struct Rules {
     pub model: MatchModel,
     /// Substitutions each side may make in a match.
     pub substitutions: u8,
+    /// Season week of the first round and the weekday it is played on. Cups only: a league plays by its round-robin.
+    pub first_week: u8,
+    pub day: Day,
 }
 
 /// Substitutions a side may make.
@@ -89,7 +92,7 @@ pub const TOP_FIVE_LEAGUES: [(&str, &str); 5] = [
 impl Rules {
     /// Everyone plays everyone home and away. The default for any league we have not researched.
     pub fn double_round_robin() -> Rules {
-        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED, model: DEFAULT_MODEL, substitutions: DEFAULT_SUBSTITUTIONS }
+        Rules { stages: vec![Stage { format: Format::RoundRobin, entry: Entry::AllClubs }], relegated: DEFAULT_RELEGATED, model: DEFAULT_MODEL, substitutions: DEFAULT_SUBSTITUTIONS, first_week: 0, day: Day::Saturday }
     }
 }
 
@@ -152,14 +155,14 @@ mod tests {
     fn the_default_rules_make_a_league() {
         let c = Competition { id: 1, name: "L".into(), country: "X".into(), rules: Rules::double_round_robin(), level: None, clubs: vec![] };
         assert!(c.is_league());
-        let cup_like = Rules { stages: vec![], relegated: 0, model: MatchModel::Cheap, substitutions: DEFAULT_SUBSTITUTIONS };
+        let cup_like = Rules { stages: vec![], relegated: 0, model: MatchModel::Cheap, substitutions: DEFAULT_SUBSTITUTIONS, first_week: 0, day: Day::Saturday };
         assert!(!Competition { rules: cup_like, ..c }.is_league());
     }
 
     #[test]
     fn a_competition_that_is_not_a_league_gets_no_fixtures_up_front() {
         let mut w = World::new(0, 0);
-        let rules = Rules { stages: vec![], relegated: 0, model: MatchModel::Cheap, substitutions: DEFAULT_SUBSTITUTIONS };
+        let rules = Rules { stages: vec![], relegated: 0, model: MatchModel::Cheap, substitutions: DEFAULT_SUBSTITUTIONS, first_week: 0, day: Day::Saturday };
         w.competitions.insert(1, Competition { id: 1, name: "C".into(), country: "X".into(), rules, level: None, clubs: vec![1, 2, 3, 4] });
         w.generate_fixtures();
         assert!(w.fixtures.is_empty());

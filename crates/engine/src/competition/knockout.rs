@@ -4,17 +4,30 @@ use crate::model::{ClubId, CompetitionId, Day, Fixture, World};
 use crate::rng::Rng;
 use std::collections::{BTreeMap, HashSet};
 
-/// The season week of a cup's first round: after the league has started, before the first cup clash with it.
+/// The season week of the main cup's first round: after the league has started, before the first cup clash with it.
 const CUP_FIRST_WEEK: u8 = 3;
 /// Weeks between one cup round and the next, so the rounds are spread through the season.
 const CUP_WEEKS_BETWEEN_ROUNDS: u8 = 4;
 /// Domestic cups are played midweek.
 const CUP_DAY: Day = Day::Wednesday;
+/// A league cup starts two weeks after the main cup and plays on Tuesdays, so a club rarely has both in one week.
+const LEAGUE_CUP_FIRST_WEEK: u8 = CUP_FIRST_WEEK + 2;
+const LEAGUE_CUP_DAY: Day = Day::Tuesday;
 
 impl Rules {
     /// One single-leg knockout of every club. The default for any cup we have not researched.
     pub fn default_cup() -> Rules {
-        Rules { stages: vec![Stage { format: Format::Knockout, entry: Entry::AllClubs }], relegated: 0, model: DEFAULT_MODEL, substitutions: DEFAULT_SUBSTITUTIONS }
+        Rules::knockout(CUP_FIRST_WEEK, CUP_DAY)
+    }
+
+    /// The same knockout played on other dates, for the second cup every country gets (its real league cups, where
+    /// there is one, differ per country and are not researched).
+    pub fn league_cup() -> Rules {
+        Rules::knockout(LEAGUE_CUP_FIRST_WEEK, LEAGUE_CUP_DAY)
+    }
+
+    fn knockout(first_week: u8, day: Day) -> Rules {
+        Rules { stages: vec![Stage { format: Format::Knockout, entry: Entry::AllClubs }], relegated: 0, model: DEFAULT_MODEL, substitutions: DEFAULT_SUBSTITUTIONS, first_week, day }
     }
 }
 
@@ -42,30 +55,35 @@ fn clubs_left(clubs: &[ClubId], played: &[&Fixture]) -> Vec<ClubId> {
 }
 
 impl World {
-    /// A cup for every country, open to all its clubs, with the default rules. Cup ids come after every league id.
-    /// A game-setup step, not part of loading real data. Safe to call twice: a country that has a cup keeps it.
+    /// A cup and a league cup for every country, both open to all its clubs, with the default rules. Cup ids come
+    /// after every league id. A game-setup step, not part of loading real data. Safe to call twice: a cup that exists
+    /// is kept.
     pub fn add_default_cups(&mut self) {
         let mut by_country: BTreeMap<String, Vec<ClubId>> = BTreeMap::new();
         for league in self.competitions.values().filter(|c| c.is_league()) {
             by_country.entry(league.country.clone()).or_default().extend(&league.clubs);
         }
-        let first_id = self.competitions.keys().max().map_or(1, |id| id + 1);
-        let has_cup = |country: &str| self.competitions.values().any(|c| c.is_cup() && c.country == country);
-        let countries: Vec<_> = by_country.into_iter().filter(|(country, clubs)| clubs.len() >= 2 && !has_cup(country)).collect();
-        for (id, (country, clubs)) in (first_id..).zip(countries) {
-            let name = format!("{country} Cup");
-            self.competitions.insert(id, Competition { id, name, country, rules: Rules::default_cup(), level: None, clubs });
+        let mut next_id = self.competitions.keys().max().map_or(1, |id| id + 1);
+        for (country, clubs) in by_country.into_iter().filter(|(_, clubs)| clubs.len() >= 2) {
+            let cups = [(format!("{country} Cup"), Rules::default_cup()), (format!("{country} League Cup"), Rules::league_cup())];
+            for (name, rules) in cups {
+                if self.competitions.values().any(|c| c.name == name) {
+                    continue;
+                }
+                self.competitions.insert(next_id, Competition { id: next_id, name, country: country.clone(), rules, level: None, clubs: clubs.clone() });
+                next_id += 1;
+            }
         }
     }
 
     /// Draws the next round of every cup whose current round is fully played (the first round if none is drawn yet).
     /// Call it again after each batch of results. Every played cup match must have a winner.
-    // shortcut: every cup plays round 1 in week 3 and then one round every 4 weeks, on a Wednesday, whatever the
-    // country; real cups have fixed dates. Upgrade when cup dates become data in `Rules`.
+    // shortcut: a cup plays its first round in the week its rules say and then one round every 4 weeks, whatever the
+    // country; real cups have fixed dates. Upgrade when cups get a date per round.
     pub fn advance_cups(&mut self, rng: &mut Rng) {
-        let cups: Vec<(CompetitionId, Vec<ClubId>)> =
-            self.competitions.values().filter(|c| c.is_cup()).map(|c| (c.id, c.clubs.clone())).collect();
-        for (id, clubs) in cups {
+        let cups: Vec<(CompetitionId, Vec<ClubId>, u8, Day)> =
+            self.competitions.values().filter(|c| c.is_cup()).map(|c| (c.id, c.clubs.clone(), c.rules.first_week, c.rules.day)).collect();
+        for (id, clubs, cup_first_week, cup_day) in cups {
             let own: Vec<&Fixture> = self.fixtures.iter().filter(|f| f.competition == id).collect();
             let last_round = own.iter().map(|f| f.round).max().unwrap_or(0);
             if own.iter().any(|f| f.result.is_none()) {
@@ -74,13 +92,13 @@ impl World {
             let matches = draw_round(&clubs_left(&clubs, &own), rng);
             let playing: Vec<ClubId> = matches.iter().flat_map(|&(home, away)| [home, away]).collect();
             let round = last_round + 1;
-            let first_choice = CUP_FIRST_WEEK.saturating_add((round - 1).saturating_mul(CUP_WEEKS_BETWEEN_ROUNDS));
+            let first_choice = cup_first_week.saturating_add((round - 1).saturating_mul(CUP_WEEKS_BETWEEN_ROUNDS));
             let Some(week) = self.first_free_week(&playing, first_choice) else { continue };
             self.fixtures.extend(matches.into_iter().map(|(home, away)| Fixture {
                 competition: id,
                 round,
                 week,
-                day: CUP_DAY,
+                day: cup_day,
                 home,
                 away,
                 result: None,
@@ -185,10 +203,26 @@ mod tests {
         w.competitions.insert(5, league(5, "Malta", vec![5])); // one club: no cup
         w.add_default_cups();
         let cups: Vec<_> = w.competitions.values().filter(|c| c.is_cup()).collect();
-        assert_eq!(cups.len(), 1);
+        assert_eq!(cups.len(), 2);
         assert_eq!((cups[0].id, cups[0].name.as_str(), cups[0].clubs.len()), (10, "England Cup", 4));
+        assert_eq!((cups[1].id, cups[1].name.as_str(), cups[1].clubs.len()), (11, "England League Cup", 4));
         w.add_default_cups();
-        assert_eq!(w.competitions.values().filter(|c| c.is_cup()).count(), 1, "a second call must add nothing");
+        assert_eq!(w.competitions.values().filter(|c| c.is_cup()).count(), 2, "a second call must add nothing");
+    }
+
+    #[test]
+    fn a_league_cup_plays_on_other_days_than_the_main_cup() {
+        let mut w = World::new(0, 2014);
+        let rules = Rules::double_round_robin();
+        w.competitions.insert(1, Competition { id: 1, name: "L".into(), country: "England".into(), rules, level: None, clubs: (1..=8).collect() });
+        w.add_default_cups();
+        w.advance_cups(&mut Rng::new(1));
+        let first_round = |name: &str| {
+            let id = w.competitions.values().find(|c| c.name == name).unwrap().id;
+            let f = w.fixtures.iter().find(|f| f.competition == id).unwrap();
+            (f.week, f.day)
+        };
+        assert_ne!(first_round("England Cup"), first_round("England League Cup"));
     }
 
     #[test]

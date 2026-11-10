@@ -68,6 +68,7 @@ The data has up to about 56 leagues per edition and we have researched only a ha
 |---|---|
 | League | double round-robin, as today |
 | Domestic cup | one single-leg knockout, called "<Country> Cup" |
+| League cup | the same knockout, called "<Country> League Cup", every country gets one (real league cups exist in some countries only and were not researched); played on Tuesdays from week 5, the cup on Wednesdays from week 3 (`Rules::first_week`, `Rules::day`) |
 | European places | by the country's ranking position, using the rank bands in [european-places-by-season.md](../game-features/european-places-by-season.md); a country outside the researched top 15 gets the one-team and three-team bands |
 
 **Default cup parameters**
