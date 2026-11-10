@@ -1,6 +1,6 @@
 //! Small builders for tests, so no test writes out a whole `Player` or `Club` by hand.
 use crate::attrs::Attr;
-use crate::lineup::{Formation, Selection};
+use crate::lineup::{fit_offset, Formation, Selection};
 use crate::model::{CareerStatus, Club, ClubId, CompetitionId, Player, PlayerId, Position, World};
 
 /// A player with the given overall and listed positions; everything else is neutral.
@@ -12,6 +12,7 @@ pub fn player(id: PlayerId, overall: u8, positions: &[Position]) -> Player {
         positions: positions.to_vec(),
         attrs: Default::default(),
         overall,
+        offset: 0.0,
         potential: overall,
         club: None,
         wage: 0,
@@ -37,6 +38,7 @@ pub fn player_with_attrs(id: PlayerId, overall: u8, positions: &[Position], attr
     for &(attr, value) in attrs {
         p.attrs.set(attr, value);
     }
+    fit_offset(&mut p);
     p
 }
 

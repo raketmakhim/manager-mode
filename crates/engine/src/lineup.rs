@@ -129,21 +129,39 @@ pub(crate) fn formula_at(player: &Player, position: Position) -> Option<f32> {
     weights(position).iter().map(|&(attr, weight)| Some(weight * player.attrs[attr]? as f32)).sum()
 }
 
-/// The listed position his overall belongs to: the one whose formula gives the most for his attributes (the first
-/// listed on a tie or when attributes are missing). The data's overall is for his best position, which is not always
-/// the first listed.
-pub(crate) fn overall_position(player: &Player) -> Option<Position> {
-    let first = *player.positions.first()?;
-    let best = player.positions.iter().filter_map(|&pos| Some((pos, formula_at(player, pos)?))).fold(None, |best: Option<(Position, f32)>, now| match best {
+/// The listed position whose formula gives the most for his attributes, with that value (the first listed on a tie);
+/// `None` when no listed position has all its attributes. His overall is that value plus his offset.
+fn best_formula(player: &Player) -> Option<(Position, f32)> {
+    player.positions.iter().filter_map(|&pos| Some((pos, formula_at(player, pos)?))).fold(None, |best: Option<(Position, f32)>, now| match best {
         Some(b) if b.1 >= now.1 => Some(b),
         _ => Some(now),
-    });
-    Some(best.map_or(first, |(pos, _)| pos))
+    })
 }
 
-/// A player's rating when he plays `slot` (0 to 99). At the position his overall belongs to (`overall_position`) it is
-/// his overall. At another position it is his overall plus the difference between that position's formula and his
-/// own position's, worked out from his own attributes, minus a small penalty if the position is not one he is listed for.
+/// The listed position his overall belongs to: his best by the formula (the first listed when attributes are
+/// missing). The data's overall is for his best position, which is not always the first listed.
+pub(crate) fn overall_position(player: &Player) -> Option<Position> {
+    let first = *player.positions.first()?;
+    Some(best_formula(player).map_or(first, |(pos, _)| pos))
+}
+
+/// Sets the offset so that his overall is what it is now: call it when a player is made from data. No-op without attributes.
+pub(crate) fn fit_offset(player: &mut Player) {
+    if let Some((_, formula)) = best_formula(player) {
+        player.offset = player.overall as f32 - formula;
+    }
+}
+
+/// Sets his overall from his attributes: the formula at his best position plus his offset. Call it after anything
+/// changes his attributes; it is the only way the overall moves after load. No-op without attributes.
+pub(crate) fn refresh_overall(player: &mut Player) {
+    if let Some((_, formula)) = best_formula(player) {
+        player.overall = (formula + player.offset).round().clamp(1.0, 99.0) as u8;
+    }
+}
+
+/// A player's rating when he plays `slot` (0 to 99): that position's formula for his attributes plus his offset,
+/// minus a small penalty if the position is not one he is listed for. At his best position that is his overall.
 pub fn rating_at(player: &Player, slot: Position) -> u8 {
     let Some(main) = overall_position(player) else {
         return player.overall.saturating_sub(if slot == Position::Gk { KEEPER_MISMATCH_PENALTY } else { OTHER_LINE_PENALTY });
@@ -153,12 +171,12 @@ pub fn rating_at(player: &Player, slot: Position) -> u8 {
     }
     let slot = if same_role(main, slot) { main } else { slot }; // his own role: his overall
     let familiarity = familiarity(player, slot);
-    let rating = match (formula_at(player, slot), formula_at(player, main)) {
-        (Some(there), Some(here)) => {
+    let rating = match formula_at(player, slot) {
+        Some(there) => {
             let unfamiliar = if familiarity == Familiarity::Natural { 0.0 } else { UNFAMILIAR_PENALTY as f32 };
-            player.overall as f32 + there - here - unfamiliar
+            there + player.offset - unfamiliar
         }
-        _ => {
+        None => {
             let penalty = match familiarity {
                 Familiarity::Natural => 0,
                 Familiarity::SameLine => SAME_LINE_PENALTY,

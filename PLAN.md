@@ -67,4 +67,4 @@ Domestic cups beyond the default, European competitions and qualification, match
 
 ## Next step
 
-Your call. Candidates: the player rating rewrite (attributes as the only truth), injuries, new youngsters, your own bids (M4), a calendar you move through, save/load.
+Your call. Candidates: injuries, new youngsters, your own bids (M4), a calendar you move through, save/load.

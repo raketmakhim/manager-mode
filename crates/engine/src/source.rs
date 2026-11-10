@@ -3,7 +3,7 @@
 // (e.g. generated fictional leagues) exists to put behind it.
 use crate::attrs::{follow_real_change, Attr, Attrs};
 use crate::competition::{Competition, Rules};
-use crate::lineup::{Formation, Selection};
+use crate::lineup::{fit_offset, Formation, Selection};
 use crate::model::*;
 use crate::transfer::{transfers_to_reality, Membership, Window};
 use rusqlite::{Connection, Result};
@@ -91,13 +91,14 @@ fn players_sql(filter: &str) -> String {
 /// Reads one row of `players_sql` as a new player: no XP, normal form and fitness.
 fn player_from_row(r: &rusqlite::Row) -> Result<Player> {
     let ratings = Ratings::from_row(r)?;
-    Ok(Player {
+    let mut player = Player {
         id: r.get("id")?,
         name: r.get("name")?,
         birth_date: r.get("dob")?,
         positions: ratings.positions,
         attrs: ratings.attrs,
         overall: ratings.overall,
+        offset: 0.0,
         potential: ratings.potential,
         club: r.get("club")?,
         wage: ratings.wage,
@@ -111,7 +112,9 @@ fn player_from_row(r: &rusqlite::Row) -> Result<Player> {
         real_change: 0,
         xp: 0,
         career: CareerStatus::Playing,
-    })
+    };
+    fit_offset(&mut player);
+    Ok(player)
 }
 
 /// One player's real ratings in one edition: the part of a `ratings` row that changes from year to year.
@@ -211,10 +214,13 @@ pub fn advance_ratings(conn: &Connection, world: &mut World, own: Option<ClubId>
         }
         (p.wage, p.value, p.contract_until) = (will_be.wage, will_be.value, will_be.contract_until);
         // The real game moves players to new positions too. Not the user's: their attributes do not follow the data,
-        // so a new position would no longer match them and every rating worked out from it (the lineup) would be off.
+        // so a new position's offset would be made up from attributes that were never rated for it.
         let own_player = p.club.is_some() && p.club == own;
-        if !own_player && !will_be.positions.is_empty() {
-            p.positions = will_be.positions.clone();
+        if !own_player {
+            if !will_be.positions.is_empty() {
+                p.positions = will_be.positions.clone();
+            }
+            fit_offset(p); // his overall is the real one plus his drift; the offset follows it to the new attributes
         }
     }
     world.edition = next;

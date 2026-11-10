@@ -87,8 +87,12 @@ pub struct Player {
     pub positions: Vec<Position>,
     /// Current ratings. These are what the simulation changes over time.
     pub attrs: Attrs,
-    /// 0-99.
+    /// 0-99. Worked out from `attrs` and `offset` (`lineup::refresh_overall`); nothing else sets it after load.
     pub overall: u8,
+    /// What the real game's overall has over the formula for his attributes at his best listed position, in overall
+    /// points (it can be negative). Fixed from load (`lineup::fit_offset`), so a player keeps what the data gives him
+    /// beyond the formula whatever happens to his attributes. 0 when the data lacks attributes.
+    pub offset: f32,
     /// 0-99.
     pub potential: u8,
     /// `None` = free agent.

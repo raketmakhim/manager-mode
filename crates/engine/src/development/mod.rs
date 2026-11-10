@@ -11,10 +11,9 @@
 mod ageing;
 mod match_based;
 
-use crate::attrs::Attr;
-use crate::lineup::overall_position;
+use crate::lineup::{overall_position, refresh_overall};
 use crate::model::{ClubId, Line, PlayerId, Position, World};
-use crate::overall::{overall_change, weights};
+use crate::overall::weights;
 use crate::rng::Rng;
 
 /// Which model decides how players change over the summer.
@@ -199,20 +198,14 @@ impl World {
     }
 }
 
-/// Moves the attributes that count for `position` by `points` each, and the overall by what that is worth. `position` is
-/// the one his overall belongs to (`overall_position`), so the overall and that position's formula move together and
-/// his rating at every other position, worked out from the two, stays right. An
-/// attribute that is missing or already at its limit does not move, and the overall does not count it.
+/// Moves the attributes that count for `position` (the one his overall belongs to, `overall_position`) by `points`
+/// each, rounded at random so the average is exact. An attribute that is missing or already at its limit does not
+/// move. His overall then follows from the attributes (`refresh_overall`), so it cannot drift from them.
 fn apply(p: &mut crate::model::Player, position: Position, points: f32, rng: &mut Rng) {
-    let changes: Vec<(Attr, i8)> = weights(position)
-        .iter()
-        .map(|&(attr, _)| {
-            let wanted = random_round(points, rng) as i8;
-            (attr, p.attrs.shift(attr, wanted))
-        })
-        .collect();
-    // Rounded at random too, or a level worth a tenth of a point would never show in the overall.
-    p.overall = (p.overall as i16 + random_round(overall_change(position, &changes), rng)).clamp(1, 99) as u8;
+    for &(attr, _) in weights(position) {
+        p.attrs.shift(attr, random_round(points, rng) as i8);
+    }
+    refresh_overall(p);
 }
 
 /// A number made whole at random, so that over many players the average is the number itself: 1.3 is 2 three times in ten
@@ -393,11 +386,32 @@ mod tests {
         let p = w.players.get_mut(&id).unwrap();
         (p.club, p.xp, p.potential, p.birth_date, p.real_change) = (club, xp, 90, "1996-01-01".into(), 6);
         assert_eq!(overall_position(&w.players[&id]), Some(Position::Rb));
-        let gap = |w: &World| w.players[&id].overall as f32 - formula_at(&w.players[&id], Position::Rb).unwrap();
-        let before = gap(&w);
         w.age_club(1, &mut Rng::new(2));
         assert!(w.players[&id].overall >= 84, "the real rise was applied: {}", w.players[&id].overall);
-        assert!((gap(&w) - before).abs() < 1.5, "his overall and his formula at the position it belongs to move together: {before} -> {}", gap(&w));
+        let p = &w.players[&id];
+        assert_eq!(p.overall, (formula_at(p, Position::Rb).unwrap() + p.offset).round() as u8);
+    }
+
+    #[test]
+    fn however_a_career_goes_the_overall_stays_what_the_attributes_and_offset_give() {
+        use crate::lineup::{formula_at, overall_position, rating_at};
+        let mut w = world_with_two_clubs(0);
+        w.year = 2014;
+        let mut rng = Rng::new(9);
+        for _ in 0..8 {
+            for p in w.players.values_mut().filter(|p| p.club == Some(1)) {
+                p.xp = 350; // three or four levels this season
+            }
+            w.level_up_club(1, &mut rng);
+            w.age_club(1, &mut rng);
+            w.year += 1;
+            for p in w.players.values().filter(|p| p.club == Some(1)) {
+                let position = overall_position(p).unwrap();
+                let expected = (formula_at(p, position).unwrap() + p.offset).round().clamp(1.0, 99.0) as u8;
+                assert_eq!(p.overall, expected, "{}: overall and attributes agree", p.name);
+                assert_eq!(rating_at(p, position), p.overall, "{}: his rating where his overall belongs is his overall", p.name);
+            }
+        }
     }
 
     #[test]
