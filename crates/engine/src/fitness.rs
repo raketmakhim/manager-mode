@@ -1,16 +1,8 @@
-//! Fitness between matches: playing lowers a player's fitness (0 to 100), rest brings it back, and a player who is not
-//! fully fit starts his next match already tired (`sim::FatigueModel`). A match costs what the tiring model says the
-//! player lost in it (`sim::match_tiredness`), so a midfielder who plays 90 minutes loses more than a centre-back and
-//! a goalkeeper loses nothing. Rest is worked out when a match is about to be played, from the days since the last one.
-//!
-//! Wear is the second, slower effect: the more matches a player plays in a row (each within a week of the one before),
-//! the lower the fitness he can recover to (a ceiling of 100 minus his wear). A week without a match clears it
-//! completely, so resting a tired player for one match gives him his recovery back.
-//!
-//! Every number between matches is in `FitnessSettings`, kept on the `World`, so a test or a tool can change them. The
-//! numbers of the tiring inside a match are constants in `sim/fatigue.rs`.
-//! Not here yet: injuries, training, rotation chosen by the user beyond the lineup screen.
-//! Design and the figures behind it: `research/game-features/fitness.md`.
+//! Fitness between matches: a match lowers a player's fitness (0 to 100) by how tired it made him (`sim::match_tiredness`),
+//! rest brings it back over the days to the next match, and a player who is not fully fit starts the next match tired
+//! (`sim::FatigueModel`). Wear lowers the fitness he can recover to after a long run of matches; a week without one
+//! clears it. Every number between matches is in `FitnessSettings` on the `World`; the numbers inside a match are in
+//! `sim/fatigue.rs`. Not here yet: injuries, training. Design and real figures: `research/game-features/fitness.md`.
 use crate::attrs::Attr;
 use crate::model::{ClubId, Player, Position, World, FULL_FITNESS};
 use crate::sim::{match_tiredness, RATING_LOSS_AT_SPENT, REFERENCE_STAMINA};

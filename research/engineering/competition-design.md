@@ -94,7 +94,7 @@ Designed 2026-11-07. Requirements: top scorers, assist providers, clean sheets a
 **Built so far (2026-11-07):** `engine/src/stats.rs` keeps totals per (player, season, competition) added up from each match's events (apps, minutes, goals, assists, shots, saves, conceded, clean sheets, cards); the events themselves are not kept. `World::stats_for(season, competition)` is the generic query (`None` means all), used by the Competitions top scorers and assists and by the Stats tab. Average ratings and the player of the match are built too (`rating`, see `research/game-features/match-ratings.md`). Not built: per-match reports kept for the user's club, a minimum-games filter, own goals.
 
 - **The match report is the source of truth.** Each played match stores its outcome and its goal events (scorer, assister, minute). Fuller reports add cards, substitutions, minutes and player ratings.
-- **Outcome is richer than a score:** goals, extra-time goals and a shootout result (shootout goals never count as scorer stats). Two-legged ties also need an aggregate. Today `Fixture.result` is only `(u8, u8)` and must change before the simulation writes results.
+- **Outcome is richer than a score:** goals, extra-time goals and a shootout result (shootout goals never count as scorer stats). Two-legged ties also need an aggregate. `Fixture.result` is an `Outcome`.
 - **Totals are keyed by (season, competition, player)** and updated when a match is recorded; they can be rebuilt from reports. One competition's table reads one key; "all competitions" sums the keys.
 - **One generic leaderboard** takes a stat, a competition, a season and a minimum number of games. Top scorers, assists, clean sheets and ratings all use it, so a new competition gets its tables for free.
 - **Competition-season is the natural record:** a competition in one season (for example "FA Cup 2016/17") holds its rules, stages, results and stats.
@@ -104,48 +104,24 @@ Designed 2026-11-07. Requirements: top scorers, assist providers, clean sheets a
 - **Invariants to test:** a match's goal events add up to its result; goals scored equal goals conceded across a competition; assists never exceed goals; the same seed gives the same top scorers.
 
 ### Two levels of match detail
-The league has up to about 56 leagues per edition, around 10,000 to 11,000 league matches a season. Full detail for all of them is wasted work, so each competition has a **detail level**, set in its rules data (a setting, not code):
 
-| Level | Used for | What is produced |
-|---|---|---|
-| **Full** | the top flights of England, Spain, Germany, Italy and France; the Champions League; every competition the user's club is in | minute-by-minute events, cards, substitutions, minutes, player ratings, commentary |
-| **Cheap** | everything else | score, scorers and assisters; clean sheets follow from the score; no cards or substitutions; ratings approximated from the result and goal involvement |
+Each competition has a match model in its rules data (`Rules.model`), a setting, not code. **Shot-based** produces minute-by-minute events, cards, substitutions, minutes and player ratings; **cheap** produces a score only (scorers, assisters and ratings approximated). Both use the same team-strength function and are checked against each other and against real tables in `simtool` (`research/game-features/simulation-balance.md`).
 
-**Cheap simulation (a sketch).** It reuses the full simulation's team-strength function, so both levels agree statistically:
-1. Each side's expected goals come from its attack against the other's defence, plus home advantage; goals are drawn from the seeded generator.
-2. Each goal picks a scorer, weighted by position and attributes (finishing, positioning, shot power) of the club's usual eleven; most goals get an assister, weighted by passing and vision, who is never the scorer.
-3. A clean sheet goes to the goalkeeper of that eleven when the opponent scores nothing.
-4. Lineups are the club's auto-picked eleven, with no rotation or in-season injuries at this level.
-5. Cost is two random draws plus about 2.7 weighted picks per match, with no minute loop.
+**Today every competition uses the shot-based model** (`DEFAULT_MODEL`): a whole-world season costs about 0.4 s in release, so the saving the cheap tier was meant to give is not needed yet. The estimate when it was designed, from the FIFA 15 to FC 24 data: about 9,800 to 11,600 league matches a season, the five top flights 16 to 19% of them; full detail for the top five, the Champions League and the user's competitions would be 18 to 22% of matches, and with a cheap match 10 to 100 times cheaper, total match work would fall to about 21 to 28% (a saving of 72 to 79%, ceiling about 80%). Not reduced by the tiers: player development, transfers, lineup picking and the save file's players. Measure both costs again before relying on the saving.
 
-**Calibration test.** `simtool` runs the same fixtures through both levels and checks that goals per match, home-win rate and the spread of scorers agree within a tolerance. A top scorer in a 20-club league should land around 20 to 35 goals (my general knowledge, not from a source; calibrate against real figures when found).
-
-**Optional: view on demand.** A cheap match stores only its score and goal events. If the user opens it, plausible full events can be generated to fit that score, seeded from the match id so the result is always the same. This costs nothing until a match is viewed.
-
-### Estimated saving (from the FIFA 15 to FC 24 data)
-- League matches per season: 9,838 (FIFA 15), 11,568 (FIFA 20), 11,238 (FC 24). The five top flights are 1,750 to 1,830 of them (16 to 19%).
-- Full detail covers the top five flights, the Champions League (about 190 matches in the 36-team format) and the user's competitions: about **2,000 to 2,400 matches, 18 to 22%**. The other 78 to 82% are cheap.
-- If a cheap match costs 10 to 100 times less than a full one, total match work falls to about 21 to 28% of full cost, a **saving of about 72 to 79%**. The ceiling is about 80%, because the full-detail 20% still costs full price.
-- Storage: a goal event is a few bytes, so a cheap match report is a small fraction of a full one. Full-report sizes are an assumption; **measure both costs once the match simulation exists.**
-- Not reduced by the tiers: player development (the dataset supplies real ratings at rollover for cheap leagues), transfers, lineup picking and the save file's players.
+Cheap-model matches have no events, so they cannot be watched, give no XP and no fitness cost; if the cheap model is ever used for background leagues, a match opened by the user could be generated on demand, seeded from the match id.
 
 ### Open questions
-- Where to get real goals and assists per season to calibrate the cheap simulation (the FIFA data has none).
-- Whether cheap leagues need injuries and suspensions at all.
-- Whether an old season's full reports are compacted to summaries (final table, winner, top scorers) when it ends, to keep saves small.
+- Where to get real goals and assists per season to calibrate the cheap model (the FIFA data has none).
+- Whether an old season's full reports are compacted to summaries when it ends, to keep saves small.
 - How the detail level changes during a career (the user's club moves league, or a club in a cheap league wins a place in the Champions League).
 
 ## Order of work
 
-1. **Done (2026-11-07):** `crates/engine/src/competition/` with `Competition`, `Rules`, `Stage`, `Format::RoundRobin` and `Entry::AllClubs`; `round_robin` and the calendar functions moved in unchanged; a richer match `Outcome` (full time, extra time, shootout) in `outcome.rs`. Built simpler than the sketch above: a `Competition` holds the `Rules` already resolved for its season (the year lookup comes in step 4), and `RoundRobin` has no `legs` parameter until a competition needs a single round-robin.
-2. **Done (2026-11-07):** `Format::Knockout` in `competition/knockout.rs`: `draw_round` (a preliminary round for the extra clubs, byes for the rest), `World::advance_cups` (draws the next round once the last is played; survivors are worked out from results), a default cup per country. Also `World::start_season` as the one game-setup call (`load_edition` stays real data only), our own seeded `Rng`, and `week_date`. Not done: seeding, lower-division hosts, two legs, real cup dates (cup rounds are in week 3 and then every 4 weeks, on Wednesdays, marked `shortcut:` in the code).
-3. **Standings done (2026-11-07):** `standings` and `World::table` (3-1-0 points; one tie-break order, a `shortcut:`). Still open: make league fixtures come out of a stage state machine.
-4. (Season change is in, with a default of 3 relegation places; the real numbers per country and year, and play-offs, belong here.) Rules-by-year lookup, with the top few countries written by hand.
-5. League phase, split, groups and two-leg ties, each when a competition needs it.
+Done: `competition/` with `Competition`, `Rules`, `Stage`, `Format::RoundRobin` and `Entry::AllClubs`; a richer match `Outcome` (full time, extra time, shootout); `Format::Knockout` (`draw_round` with byes, `World::advance_cups`, a default cup per country); `World::start_season`; `standings` and `World::table`; season change with promotion and relegation (default 3 places). Next: rules by year, with the top few countries written by hand; make league fixtures come out of a stage state machine; league phase, split, groups and two-leg ties, each when a competition needs it.
 
 ## Open questions
 
 - Exact stage interface (does the state machine read results from `World`, or get them passed in?).
 - How a stage's entry rule refers to another competition (the qualification table).
-- Whether the weekly calendar placement of knockout rounds needs preferred weeks (midweek), which needs a day-of-week field.
 - Where the real per-country rules come from. Covered so far: [domestic-cup-formats.md](../game-features/domestic-cup-formats.md) (four cups) and [european-places-by-season.md](../game-features/european-places-by-season.md) (places per country, 2014/15 to 2023/24). Everything else is listed under the open questions in competition-formats.md.

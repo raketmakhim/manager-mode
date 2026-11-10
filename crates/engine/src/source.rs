@@ -108,6 +108,7 @@ fn player_from_row(r: &rusqlite::Row) -> Result<Player> {
         fitness_day: 0,
         matches_in_a_row: 0,
         last_match_day: 0,
+        real_change: 0,
         xp: 0,
         career: CareerStatus::Playing,
     })
@@ -183,13 +184,17 @@ fn read_memberships(conn: &Connection, version: i64) -> Result<HashMap<PlayerId,
 }
 
 /// Moves every player on to the next edition's real ratings: how the real game changed each rating between this
-/// edition and the next is added to the player's current rating (see `follow_real_change`), so a player the user
-/// has trained or neglected keeps that difference. Wage, value and contract are replaced by the real ones.
+/// edition and the next is added to the player's current rating (see `follow_real_change`), so a player keeps any
+/// difference from the real career. Players of the club `own` (the user's) are left out: their overall, potential and
+/// attributes are not touched, because the real change would be random noise to a squad that develops by its own
+/// rules (`World::age_club`, `level_up_club`), and neither are their positions; the real change in overall is kept in `Player::real_change`, and
+/// `age_club` uses it when a player really improved more than its own rules give him. Wage, value and contract are replaced by the real ones for everyone,
+/// and positions for everyone but the user's players.
 /// Returns false, and changes nothing, when there is no next edition (the data ends at FC 24).
 // shortcut: clubs keep their squads (transfers are made separately: `plan_transfers`), a player missing from the next edition keeps
 // his ratings, and the user's contracts are overwritten like everyone's. Upgrade when transfers and contract
 // renewals exist.
-pub fn advance_ratings(conn: &Connection, world: &mut World) -> Result<bool> {
+pub fn advance_ratings(conn: &Connection, world: &mut World, own: Option<ClubId>) -> Result<bool> {
     let next = world.edition + 1;
     if !editions(conn)?.contains(&next) {
         return Ok(false);
@@ -197,12 +202,19 @@ pub fn advance_ratings(conn: &Connection, world: &mut World) -> Result<bool> {
     let (before, after) = (read_ratings(conn, world.edition)?, read_ratings(conn, next)?);
     for p in world.players.values_mut() {
         let (Some(was), Some(will_be)) = (before.get(&p.id), after.get(&p.id)) else { continue };
-        p.overall = follow_real_change(p.overall, was.overall, will_be.overall);
-        p.potential = follow_real_change(p.potential, was.potential, will_be.potential);
-        p.attrs = p.attrs.follow_real_change(&was.attrs, &will_be.attrs);
+        if p.club.is_none() || p.club != own {
+            p.overall = follow_real_change(p.overall, was.overall, will_be.overall);
+            p.potential = follow_real_change(p.potential, was.potential, will_be.potential);
+            p.attrs = p.attrs.follow_real_change(&was.attrs, &will_be.attrs);
+        } else {
+            p.real_change = (will_be.overall as i16 - was.overall as i16).clamp(i8::MIN as i16, i8::MAX as i16) as i8;
+        }
         (p.wage, p.value, p.contract_until) = (will_be.wage, will_be.value, will_be.contract_until);
-        if !will_be.positions.is_empty() {
-            p.positions = will_be.positions.clone(); // the real game moves players to new positions too
+        // The real game moves players to new positions too. Not the user's: their attributes do not follow the data,
+        // so a new position would no longer match them and every rating worked out from it (the lineup) would be off.
+        let own_player = p.club.is_some() && p.club == own;
+        if !own_player && !will_be.positions.is_empty() {
+            p.positions = will_be.positions.clone();
         }
     }
     world.edition = next;
@@ -279,7 +291,7 @@ mod tests {
         let rooney = 54050;
         w.players.get_mut(&rooney).unwrap().overall += 4; // trained up by the user
         let untouched = *w.players.keys().find(|&&id| id != rooney && w.players[&id].overall < 90).unwrap();
-        assert!(advance_ratings(&conn, &mut w).unwrap());
+        assert!(advance_ratings(&conn, &mut w, None).unwrap());
         assert_eq!(w.edition, 16);
 
         let real16 = read_ratings(&conn, 16).unwrap();
@@ -312,10 +324,37 @@ mod tests {
     }
 
     #[test]
+    fn advancing_leaves_the_users_players_alone_and_everyone_elses_follow_the_real_data() {
+        let Some(conn) = db() else { return };
+        let mut w = load_edition(&conn, 15).unwrap();
+        let own = *w.clubs.keys().next().unwrap();
+        let mine: Vec<_> = w.clubs[&own].squad.iter().map(|id| (*id, w.players[id].overall, w.players[id].attrs)).collect();
+        assert!(advance_ratings(&conn, &mut w, Some(own)).unwrap());
+        for (id, overall, attrs) in mine {
+            assert_eq!(w.players[&id].overall, overall, "{}", w.players[&id].name);
+            assert!(Attr::ALL.iter().all(|&a| w.players[&id].attrs[a] == attrs[a]), "{}", w.players[&id].name);
+        }
+        let real16 = read_ratings(&conn, 16).unwrap();
+        let real15 = read_ratings(&conn, 15).unwrap();
+        let own_positions_kept = w.clubs[&own].squad.iter().all(|id| w.players[id].positions == real15[id].positions);
+        assert!(own_positions_kept, "the user's players keep the positions their attributes were built for");
+        let moved = w.clubs[&own].squad.iter().filter(|id| w.players[*id].real_change != 0).count();
+        assert!(moved > 0, "the data changed some of the user's players");
+        for id in &w.clubs[&own].squad {
+            if let (Some(was), Some(will_be)) = (real15.get(id), real16.get(id)) {
+                assert_eq!(w.players[id].real_change as i16, will_be.overall as i16 - was.overall as i16);
+            }
+        }
+        let real16 = read_ratings(&conn, 16).unwrap();
+        let someone_else = w.players.values().find(|p| p.club.is_some() && p.club != Some(own) && real16.contains_key(&p.id) && p.overall < 90).unwrap();
+        assert_eq!(someone_else.overall, real16[&someone_else.id].overall);
+    }
+
+    #[test]
     fn advancing_also_gives_players_their_real_new_positions() {
         let Some(conn) = db() else { return };
         let mut w = load_edition(&conn, 15).unwrap();
-        advance_ratings(&conn, &mut w).unwrap();
+        advance_ratings(&conn, &mut w, None).unwrap();
         let w16 = load_edition(&conn, 16).unwrap();
         let same = w.players.values().filter(|p| w16.players.get(&p.id).is_some_and(|q| q.positions == p.positions)).count();
         let in_both = w.players.keys().filter(|id| w16.players.contains_key(id)).count();
@@ -326,7 +365,7 @@ mod tests {
     fn there_is_nothing_to_advance_to_after_the_last_edition() {
         let Some(conn) = db() else { return };
         let mut w = World::new(24, 2023);
-        assert!(!advance_ratings(&conn, &mut w).unwrap());
+        assert!(!advance_ratings(&conn, &mut w, None).unwrap());
         assert_eq!(w.edition, 24);
     }
 
@@ -362,7 +401,7 @@ mod tests {
             let window = plan_transfers(&conn, &w, None).unwrap();
             w.start_next_season(&mut rng);
             w.make_transfers(window);
-            assert!(advance_ratings(&conn, &mut w).unwrap());
+            assert!(advance_ratings(&conn, &mut w, None).unwrap());
             let smallest = w.clubs.values().map(|c| c.squad.len()).min().unwrap();
             assert!(smallest >= 11, "after summer {summer} a club has only {smallest} players: its matches would be against nobody");
         }

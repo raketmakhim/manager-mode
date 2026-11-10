@@ -1,5 +1,6 @@
 //! The match-based experience model: every match a player plays gives him 1 to 10 experience points (XP), more for
-//! playing the whole match, for playing well and for being the best player, and less the higher his overall is. Each
+//! playing the whole match, for playing well and for being the best player, and less the higher his overall is; a young
+//! player's XP is then multiplied by an age bonus (up to double). Each
 //! time his XP bar fills (`XP_PER_LEVEL`) he levels up: his overall rises by a number of points that is smaller for an
 //! older player and, past his potential, smaller again (a soft limit: a winning player keeps rising, slowly). Every
 //! number is our own design, tuned with `dev-tools/simtool`; there is no source (`research/game-features/experience.md`).
@@ -19,6 +20,9 @@ const XP_RANGE: (f32, f32) = (1.0, 10.0);
 const FACTOR_AT_ZERO: f32 = 99.0;
 const FACTOR_DIVISOR: f32 = 45.0;
 const FACTOR_RANGE: (f32, f32) = (0.3, 1.0);
+/// The XP of a young player is multiplied by this: (the oldest age it applies to, the multiplier), youngest first.
+/// Players older than the last age get 1. A young player grows faster in real life, so he fills his bar sooner.
+const AGE_BONUS: [(u8, f32); 3] = [(20, 2.0), (23, 1.8), (26, 1.5)];
 /// One rating point above or below what a regular of his line normally gets is full form (or none).
 const FORM_SCALE: f32 = 1.0;
 /// Overall points one level gives a player of 21 or younger who is below his potential.
@@ -47,7 +51,12 @@ fn overall_factor(overall: u8) -> f32 {
     ((FACTOR_AT_ZERO - overall as f32) / FACTOR_DIVISOR).clamp(FACTOR_RANGE.0, FACTOR_RANGE.1)
 }
 
-/// The XP of one match, 1 to 10 (0 if he did not play).
+/// The multiplier on a player's match XP for his age: 2 up to 20, 1.8 to 23, 1.5 to 26, then 1.
+fn age_bonus(age: u8) -> f32 {
+    AGE_BONUS.iter().find(|&&(oldest, _)| age <= oldest).map_or(1.0, |&(_, bonus)| bonus)
+}
+
+/// The XP of one match: 1 to 10 for a player of 27 or older (0 if he did not play), more for a younger one (up to 20).
 pub(super) fn match_xp(play: &MatchPlay) -> u8 {
     if play.minutes == 0 {
         return 0;
@@ -56,7 +65,8 @@ pub(super) fn match_xp(play: &MatchPlay) -> u8 {
     // A player with too few minutes to be rated has middling form.
     let form = play.rating.map_or(0.5, |r| ((r - play.neutral_rating - expected_rating_above_neutral(play.line)) / FORM_SCALE + 0.5).clamp(0.0, 1.0));
     let raw = APPEARANCE_XP + MINUTES_XP * share + FORM_XP * form + PLAYER_OF_THE_MATCH_XP * play.player_of_the_match as u8 as f32;
-    (raw * overall_factor(play.overall)).round().clamp(XP_RANGE.0, XP_RANGE.1) as u8
+    let base = (raw * overall_factor(play.overall)).round().clamp(XP_RANGE.0, XP_RANGE.1);
+    (base * age_bonus(play.age)).round() as u8
 }
 
 fn youth(age: u8) -> f32 {

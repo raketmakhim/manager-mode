@@ -9,9 +9,10 @@
 //! match ratings are worked out from those events, so any model that emits the events they need works with them.
 //! Adding a model: a new file, a `MatchModel` variant and an arm in `simulate`; the compiler lists the rest.
 //!
-//! Inside the shot-based model, two parts are models of their own, swapped the same way (a variant and an arm; the
+//! Inside the shot-based model, four parts are models of their own, swapped the same way (a variant and an arm; the
 //! contract tests run through `ALL`): `scoring` (who shoots, scores and assists), `discipline` (who fouls and is
-//! carded) and `fatigue` (how tired players get) and `substitution` (when changes are made, who goes off and who comes on). Player match ratings are a third, in `rating`.
+//! carded), `fatigue` (how tired players get) and `substitution` (when changes are made, who goes off and on). Player
+//! match ratings are another, in `rating`.
 mod cheap;
 mod discipline;
 mod fatigue;

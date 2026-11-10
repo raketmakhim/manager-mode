@@ -2,6 +2,7 @@
 //!
 //! - `attrs`: the player attributes (`Attr`, `Attrs`) and which ones outfield players and keepers have.
 //! - `competition`: leagues and cups as lists of stages, schedules and the weekly match limit.
+//! - `development`: how the user's players change away from their real careers: match XP and levels (`ExperienceModel`) and the summer's ageing (`AgeingModel`).
 //! - `fitness`: how playing tires players and rest brings them back between matches.
 //! - `history`: reading real player history out of history.db.
 //! - `lineup`: formations, and picking the best eleven for one.
@@ -11,7 +12,7 @@
 //! - `rating`: player match ratings behind one function, `rate` (a swappable `RatingModel`).
 //! - `retirement`: who decides at the start of a season to retire at its end (`RetirementModel`).
 //! - `rng`: the seeded random number generator every simulation takes.
-//! - `sim`: the match models behind one function, `simulate`: cheap (team strength to a score) and shot-based (shots, saves, goals, cards, corners, possession). Inside the shot-based model, who shoots, scores and assists (`ScoringModel`), who fouls and is carded (`DisciplineModel`), who is substituted when (`SubstitutionModel`) and how tired players get (`FatigueModel`) are swappable models of their own. `development` is the same for experience (`ExperienceModel`): every match gives XP, and a full XP bar levels the user's players up, away from their real careers. A `LiveMatch` plays the shot-based model a minute at a time so the user can change a side in between.
+//! - `sim`: the match models behind one function, `simulate` (cheap: team strength to a score; shot-based: shots, goals, cards and more, with swappable parts for scoring, discipline, substitutions and fatigue). A `LiveMatch` plays the shot-based model a minute at a time so the user can change a side in between.
 //! - `source`: building a `World` from history.db.
 //! - `stats`: what each player did, added up from the events of the matches played.
 //! - `transfer`: players changing clubs in the summer (`Transfer`, `Window`); the real moves come from the data (`source::plan_transfers`).
@@ -49,7 +50,7 @@ pub use model::{
     NEUTRAL_FORM,
 };
 pub use outcome::{Outcome, Side};
-pub use development::{Development, ExperienceModel, XP_PER_LEVEL};
+pub use development::{AgeingModel, Development, ExperienceModel, XP_PER_LEVEL};
 pub use rating::RatingModel;
 pub use retirement::{chance as retirement_chance, RetirementModel};
 pub use overall::{overall_change, weights};

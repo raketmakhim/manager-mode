@@ -22,6 +22,7 @@ pub fn player(id: PlayerId, overall: u8, positions: &[Position]) -> Player {
         fitness_day: 0,
         matches_in_a_row: 0,
         last_match_day: 0,
+        real_change: 0,
         xp: 0,
         career: CareerStatus::Playing,
     }

@@ -63,7 +63,7 @@ pub fn ui(ui: &mut egui::Ui, world: &World, club: ClubId, history: &History, sta
         return;
     }
     ui.label(format!("Changes are since the start of {}. Open a player for his overall over the seasons.", history.season()));
-    ui.label(format!("XP: every match gives 1 to 10 (less for a high overall). At {XP_PER_LEVEL} XP a player levels up and the rest stays in his bar. Last: XP of his last match. Fit: his fitness (green above 75, yellow 60 to 75, orange 45 to 59, red below); playing lowers it, rest between matches brings it back, most of it on the first day."));
+    ui.label(format!("XP: every match gives 1 to 10 (less for a high overall), up to double that for a player of 20 or younger. At {XP_PER_LEVEL} XP a player levels up and the rest stays in his bar. Last: XP of his last match. Fit: his fitness (green above 75, yellow 60 to 75, orange 45 to 59, red below); playing lowers it, rest between matches brings it back, most of it on the first day."));
     ui.add_space(6.0);
     let then = &history.season_start;
 
@@ -259,7 +259,7 @@ mod tests {
         let mut world = engine::load_edition(&conn, 15).unwrap();
         let club = *world.clubs.keys().next().unwrap();
         let mut history = History::new(&world, club, "2014/15".into());
-        assert!(engine::advance_ratings(&conn, &mut world).unwrap());
+        assert!(engine::advance_ratings(&conn, &mut world, None).unwrap());
         let changed = world.clubs[&club].squad.iter().filter(|id| world.players[*id].overall != history.season_start[*id].overall).count();
         assert!(changed > 0, "a whole squad's ratings did not move in a year");
         history.start_season(&world, club, "2015/16".into());

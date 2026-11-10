@@ -33,7 +33,7 @@ pub struct PlayerStats {
     pub rated: u16,
     /// Matches he was the best player of.
     pub player_of_the_match: u16,
-    /// Experience points earned (1 to 10 a match played; see `development`).
+    /// Experience points earned (1 to 10 a match played, more for a young player; see `development`).
     pub xp: u32,
 }
 
@@ -82,7 +82,7 @@ struct Row {
 /// player of the match (the best rating on the winning side, or on the pitch if it was a draw). Extra time counts as
 /// minutes; a red card or a substitution ends the player's minutes, and a substitute's start at his minute. Goals
 /// conceded are those while he was on the pitch.
-pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: RatingModel) -> Vec<(PlayerId, PlayerStats)> {
+pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: RatingModel, age_of: impl Fn(PlayerId) -> u8) -> Vec<(PlayerId, PlayerStats)> {
     let length = if outcome.extra_time.is_some() { 120 } else { 90 };
     let mut rows: Vec<Row> = vec![];
     for (side, side_index) in [Side::Home, Side::Away].into_iter().zip(0..) {
@@ -161,6 +161,7 @@ pub fn match_stats(detail: &MatchDetail, outcome: &Outcome, rating_model: Rating
             rating: *rating,
             neutral_rating: neutral_rating(rating_model, row.position, row.overall),
             overall: row.overall,
+            age: age_of(row.id),
             line: row.position.line(),
             player_of_the_match: best == Some(i),
         };
@@ -188,18 +189,23 @@ fn player_of_the_match(rows: &[Row], ratings: &[Option<f32>], winner: Option<Sid
 
 /// The stats every player earned in a live match that is over (see `LiveMatch::is_over`), for the screen that shows
 /// the match's XP before the match is stored.
-pub fn live_match_stats(live: &LiveMatch) -> Vec<(PlayerId, PlayerStats)> {
+pub fn live_match_stats(live: &LiveMatch, world: &World) -> Vec<(PlayerId, PlayerStats)> {
     let report = live.clone().into_report(&mut Rng::new(0));
     let detail = report.detail.expect("a live match has events");
-    match_stats(&detail, &report.outcome, DEFAULT_RATING_MODEL)
+    match_stats(&detail, &report.outcome, DEFAULT_RATING_MODEL, |id| world.age_of(id))
 }
 
 impl World {
+    /// A player's age in the current season (the age of a player nobody knows, such as an empty slot, is 27: no bonus).
+    fn age_of(&self, player: PlayerId) -> u8 {
+        self.players.get(&player).map_or(27, |p| p.age(self.year))
+    }
+
     /// Adds a played match, played on `day` of the season, to its players' totals for this season and competition, and
     /// tires them (`Player::tire`).
     pub fn record_match(&mut self, competition: CompetitionId, day: u32, detail: &MatchDetail, outcome: &Outcome) {
         let settings = self.fitness_settings;
-        for (player, stats) in match_stats(detail, outcome, DEFAULT_RATING_MODEL) {
+        for (player, stats) in match_stats(detail, outcome, DEFAULT_RATING_MODEL, |id| self.age_of(id)) {
             self.stats.entry((player, self.year, competition)).or_default().add(&stats);
             self.last_match_xp.insert(player, stats.xp as u8);
             if let Some(p) = self.players.get_mut(&player) {
@@ -254,7 +260,7 @@ mod tests {
             Event::Substitution { minute: 60, side: Side::Home, off: 9, on: 30, position: Position::St, rating: 68 },
             Event::Goal { minute: 70, side: Side::Home, scorer: 30, assister: None },
         ];
-        let stats = match_stats(&detail(events), &Outcome::full_time(1, 1), RatingModel::Formula);
+        let stats = match_stats(&detail(events), &Outcome::full_time(1, 1), RatingModel::Formula, |_| 27);
         assert_eq!(stats.len(), 23);
         let (off, on) = (row(&stats, 9), row(&stats, 30));
         assert_eq!((off.minutes, off.appearances, off.conceded), (60, 1, 1));
@@ -270,7 +276,7 @@ mod tests {
             Event::Shot { minute: 10, side: Side::Home, shooter: 9, on_target: true },
             Event::Goal { minute: 10, side: Side::Home, scorer: 9, assister: Some(6) },
         ];
-        let stats = match_stats(&detail(events), &Outcome::full_time(1, 0), RatingModel::Formula);
+        let stats = match_stats(&detail(events), &Outcome::full_time(1, 0), RatingModel::Formula, |_| 27);
         assert_eq!(stats.len(), 22);
         let scorer = row(&stats, 9);
         assert_eq!((scorer.goals, scorer.shots, scorer.shots_on_target, scorer.appearances, scorer.minutes), (1, 1, 1, 1, 90));
@@ -282,18 +288,18 @@ mod tests {
     #[test]
     fn a_red_card_ends_the_minutes_and_extra_time_adds_thirty() {
         let red = vec![Event::Red { minute: 55, side: Side::Away, player: 15 }];
-        let stats = match_stats(&detail(red), &Outcome::full_time(0, 0), RatingModel::Formula);
+        let stats = match_stats(&detail(red), &Outcome::full_time(0, 0), RatingModel::Formula, |_| 27);
         assert_eq!((row(&stats, 15).minutes, row(&stats, 15).reds), (55, 1));
         assert_eq!(row(&stats, 14).minutes, 90);
         let aet = Outcome { full_time: (0, 0), extra_time: Some((0, 0)), shootout: Some((4, 3)) };
-        assert_eq!(row(&match_stats(&detail(vec![]), &aet, RatingModel::Formula), 3).minutes, 120);
+        assert_eq!(row(&match_stats(&detail(vec![]), &aet, RatingModel::Formula, |_| 27), 3).minutes, 120);
     }
 
     #[test]
     fn an_empty_slot_is_not_an_appearance_and_totals_add_up_across_matches() {
         let mut d = detail(vec![Event::Save { minute: 30, side: Side::Away, keeper: 12 }]);
         d.lineups[0][10] = 0;
-        assert_eq!(match_stats(&d, &Outcome::full_time(0, 0), RatingModel::Formula).len(), 21);
+        assert_eq!(match_stats(&d, &Outcome::full_time(0, 0), RatingModel::Formula, |_| 27).len(), 21);
 
         let mut w = World::new(0, 2014);
         w.record_match(7, 7, &d, &Outcome::full_time(0, 0));
@@ -313,20 +319,20 @@ mod tests {
             Event::Shot { minute: 10, side: Side::Home, shooter: 9, on_target: true },
             Event::Goal { minute: 10, side: Side::Home, scorer: 9, assister: Some(6) },
         ];
-        let stats = match_stats(&detail(events), &Outcome::full_time(1, 0), RatingModel::Formula);
+        let stats = match_stats(&detail(events), &Outcome::full_time(1, 0), RatingModel::Formula, |_| 27);
         assert!(stats.iter().all(|(_, s)| s.rated == 1 && s.average_rating().is_some()));
         assert_eq!(stats.iter().map(|(_, s)| s.player_of_the_match).sum::<u16>(), 1, "one player of the match");
         assert_eq!(row(&stats, 9).player_of_the_match, 1, "the scorer of the only goal wins it");
         assert!(row(&stats, 9).average_rating() > row(&stats, 12).average_rating(), "the scorer beats the beaten side");
         // A draw: the player of the match can come from either side.
-        let draw = match_stats(&detail(vec![]), &Outcome::full_time(0, 0), RatingModel::Formula);
+        let draw = match_stats(&detail(vec![]), &Outcome::full_time(0, 0), RatingModel::Formula, |_| 27);
         assert_eq!(draw.iter().map(|(_, s)| s.player_of_the_match).sum::<u16>(), 1);
     }
 
     #[test]
     fn a_sent_off_player_under_ten_minutes_is_not_rated() {
         let red = vec![Event::Red { minute: 5, side: Side::Home, player: 4 }];
-        let stats = match_stats(&detail(red), &Outcome::full_time(0, 0), RatingModel::Formula);
+        let stats = match_stats(&detail(red), &Outcome::full_time(0, 0), RatingModel::Formula, |_| 27);
         assert_eq!((row(&stats, 4).rated, row(&stats, 4).average_rating()), (0, None));
         assert_eq!(row(&stats, 5).rated, 1);
     }

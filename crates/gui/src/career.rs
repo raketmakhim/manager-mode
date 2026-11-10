@@ -180,17 +180,20 @@ impl Career {
         let retired = world.retire_planned();
         let deals = (window.transfers().len(), window.questions_for(club).iter().filter(|&&i| !window.is_declined(i)).count());
         world.make_transfers(window);
-        let ratings = match advance_ratings(conn, world) {
-            Ok(true) => "Player ratings updated to the real new season.",
-            Ok(false) => "No newer data: player ratings are unchanged.",
+        let ratings = match advance_ratings(conn, world, Some(club)) {
+            Ok(true) => "Other clubs' players follow the real new season.",
+            Ok(false) => "No newer data: other clubs' players are unchanged.",
             Err(_) => "Could not read the new ratings.",
         };
-        // After the transfers and new ratings, so the newcomers decide too and the chance uses the new overall.
-        let planned = world.plan_retirements(&mut self.rng);
-        let planning: Vec<String> = planned.iter().filter(|(c, _)| *c == Some(club)).map(|(_, id)| world.players[id].name.clone()).collect();
+        // The squad is recorded before the summer's ageing, so the changes the squad view shows for this season include it.
         if let Some(history) = &mut self.history {
             history.start_season(world, club, season_name(world.year));
         }
+        let summer = world.age_club(club, &mut self.rng);
+        let (up, down) = (summer.iter().filter(|d| d.overall_after > d.overall_before).count(), summer.iter().filter(|d| d.overall_after < d.overall_before).count());
+        // After the transfers and the ageing, so the newcomers decide too and the chance uses the new overall.
+        let planned = world.plan_retirements(&mut self.rng);
+        let planning: Vec<String> = planned.iter().filter(|(c, _)| *c == Some(club)).map(|(_, id)| world.players[id].name.clone()).collect();
         let mine = moves.iter().find(|m| m.club == club);
         let text = match mine {
             Some(m) => {
@@ -199,7 +202,7 @@ impl Career {
             }
             _ => "Your club stays in its division.".to_string(),
         };
-        self.last_played = Some(format!("{} clubs changed division. {text} {} transfers, {} of them yours. {} players retired{}, {} plan to retire at the end of this season{}. {ratings}", moves.len(), deals.0, deals.1, retired.len(), yours(&leaving), planned.len(), yours(&planning)));
+        self.last_played = Some(format!("{} clubs changed division. {text} {} transfers, {} of them yours. Over the summer {up} of your players improved and {down} declined. {} players retired{}, {} plan to retire at the end of this season{}. {ratings}", moves.len(), deals.0, deals.1, retired.len(), yours(&leaving), planned.len(), yours(&planning)));
         self.competition = None;
     }
 

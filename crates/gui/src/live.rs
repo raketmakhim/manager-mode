@@ -248,7 +248,7 @@ fn team_ui(ui: &mut egui::Ui, world: &World, s: &mut State) {
 fn xp_ui(ui: &mut egui::Ui, world: &World, s: &mut State) {
     let f = &world.fixtures[s.fixture];
     let club = if s.side == Side::Home { f.home } else { f.away };
-    let stats = s.result.get_or_insert_with(|| live_match_stats(&s.live));
+    let stats = s.result.get_or_insert_with(|| live_match_stats(&s.live, world));
     ui.heading("Match XP");
     egui::Grid::new("live_xp").striped(true).show(ui, |ui| {
         for h in ["Player", "Min", "Rating", "XP"] {

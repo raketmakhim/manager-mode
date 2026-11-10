@@ -110,6 +110,9 @@ pub struct Player {
     pub matches_in_a_row: u16,
     /// The day of the season of the last match of that run.
     pub last_match_day: u32,
+    /// How much his overall really changed over the summer in the data (negative for a decline), for the user's
+    /// players: `World::age_club` uses it when it is a bigger rise than its own table gives, then resets it to 0.
+    pub real_change: i8,
     /// Experience points toward the next level, added by every match he plays (`development`). Game-only. Only the
     /// user's club levels up, so the others' bars are not used.
     pub xp: u16,

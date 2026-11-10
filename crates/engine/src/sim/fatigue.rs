@@ -1,16 +1,11 @@
-//! Tiring during a match: how tired a player is after some minutes on the pitch, and what that does to his rating in
-//! his slot. A fatigue model is a pure function from the player, the minutes he has played and his side's share of the
-//! ball; the match model calls it through `FatigueModel`. A player who is not fully fit (`MatchPlayer::start_tiredness`)
-//! starts already tired. Rest between matches, and how fitness becomes that tiredness, are in `fitness`; injuries do not
-//! exist yet.
-//! Adding a model: a `FatigueModel` variant and an arm in `tiredness`; the contract tests below run for it through
-//! `FatigueModel::ALL`.
+//! Tiring during a match: how tired a player is after some minutes on the pitch, and what that does to his rating in his
+//! slot. A pure function of the player, his minutes and his side's share of the ball, chosen by `FatigueModel`. A player
+//! who is not fully fit (`MatchPlayer::start_tiredness`) starts already tired; rest between matches is in `fitness`.
+//! Adding a model: a variant and an arm in `tiredness`; the contract tests run for it through `FatigueModel::ALL`.
 //!
 //! - `None`: nobody tires.
-//! - `ByStamina`: tiredness grows with the minutes played, faster for a player with low stamina, for a midfielder or
-//!   wide player than for a centre-back, and a little faster for the side without the ball.
-//!
-//! Work rate is not used (see `research/game-features/fitness.md`): stamina alone for now.
+//! - `ByStamina`: tiredness grows with the minutes played, faster for low stamina, for a midfielder or wide player than a
+//!   centre-back, and a little faster for the side without the ball. Work rate is not used (`research/game-features/fitness.md`).
 use super::MatchPlayer;
 use crate::model::Position;
 

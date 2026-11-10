@@ -125,14 +125,14 @@ pub fn familiarity(player: &Player, slot: Position) -> Familiarity {
 }
 
 /// What the position's overall formula gives for this player's attributes, or `None` if one of them is missing.
-fn formula_at(player: &Player, position: Position) -> Option<f32> {
+pub(crate) fn formula_at(player: &Player, position: Position) -> Option<f32> {
     weights(position).iter().map(|&(attr, weight)| Some(weight * player.attrs[attr]? as f32)).sum()
 }
 
 /// The listed position his overall belongs to: the one whose formula gives the most for his attributes (the first
 /// listed on a tie or when attributes are missing). The data's overall is for his best position, which is not always
 /// the first listed.
-fn overall_position(player: &Player) -> Option<Position> {
+pub(crate) fn overall_position(player: &Player) -> Option<Position> {
     let first = *player.positions.first()?;
     let best = player.positions.iter().filter_map(|&pos| Some((pos, formula_at(player, pos)?))).fold(None, |best: Option<(Position, f32)>, now| match best {
         Some(b) if b.1 >= now.1 => Some(b),

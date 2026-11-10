@@ -24,6 +24,7 @@ Easy to read, no repeated code, nothing clever.
 - **One pattern per recurring job.** Randomness is always an explicit seeded RNG passed in. Database columns are read by name. Errors use one style.
 - **Tests state rules, not output.** Prefer properties ("no club plays twice in a round", `calendar_problems()` is empty) that hold for every format. Exact numbers only as a few anchors (64 clubs give 63 matches).
 - **Small steps.** Each change does one thing and leaves all tests passing.
+- **Docs stay lean.** `research/` notes hold findings, decisions and why; the code holds numbers and what it does. No changelog (git has it), no constants copied from code (point to the constant), no superseded plans (delete them, do not strike them through), no restating of what a module doc already says. `PLAN.md` is milestones and decisions only. A change that makes a doc wrong updates that doc in the same commit.
 
 Before every commit run `cargo clippy --workspace --all-targets` and `cargo test`. The `OUTFIELD` and `KEEPER` lists and the `Position` enum use blank lines between groups on purpose, so do not run `cargo fmt` over `engine/src/attrs.rs` and `model.rs` until `#[rustfmt::skip]` is added to them (`overall.rs` already has it).
 
