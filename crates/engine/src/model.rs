@@ -208,6 +208,8 @@ pub struct Fixture {
     pub away: ClubId,
     /// `None` until played.
     pub result: Option<Outcome>,
+    /// True when a level score goes to extra time and penalties: a cup tie, the second leg of a European tie, a final.
+    pub must_have_winner: bool,
 }
 
 impl Fixture {
@@ -294,7 +296,7 @@ mod tests {
     }
 
     fn fixture(result: Option<Outcome>) -> Fixture {
-        Fixture { competition: 1, round: 1, week: 1, day: Day::Saturday, home: 10, away: 20, result }
+        Fixture { competition: 1, round: 1, week: 1, day: Day::Saturday, home: 10, away: 20, result, must_have_winner: false }
     }
 
     #[test]

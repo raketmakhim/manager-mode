@@ -83,7 +83,7 @@ impl EventStats {
     fn measure(world: &World, league: &Competition, rng: &mut Rng) -> EventStats {
         let mut stats = EventStats::default();
         for f in world.fixtures.iter().filter(|f| f.competition == league.id) {
-            let report = simulate(league.rules.model, &world.match_input(f.home, f.away, league, None), rng);
+            let report = simulate(league.rules.model, &world.match_input(f, league, None), rng);
             let Some(detail) = report.detail else { return stats };
             stats.matches += 1;
             stats.home_possession += detail.home_possession as u32;

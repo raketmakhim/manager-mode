@@ -23,7 +23,7 @@ A football (soccer) career/manager-mode game in the style of FIFA's Career Mode.
 
 ## Later
 
-Youth academy, European competitions, training drills, board objectives, save/load, real-time 2D match view, editions before FIFA 15.
+Youth academy, the Europa and Conference Leagues, training drills, board objectives, save/load, real-time 2D match view, editions before FIFA 15.
 
 ## Tech
 

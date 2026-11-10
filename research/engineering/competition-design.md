@@ -35,6 +35,8 @@ enum Format {
 }
 ```
 
+Built so far: `Format::{RoundRobin, Knockout, Groups, TwoLeggedKnockout}` and `Entry::{AllClubs, GroupQualifiers}` with `Rules::{first_week, day}`; the legs, extra-time and seeding fields above are not.
+
 Each format runs as a small state machine answering the same questions: which fixtures are ready now, is the stage finished, who advances. A round-robin answers the first at once. A knockout answers round by round, after the last round is played.
 
 ## What is shared (the reuse)

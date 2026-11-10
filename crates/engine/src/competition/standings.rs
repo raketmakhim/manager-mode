@@ -82,7 +82,7 @@ mod tests {
     use crate::outcome::Outcome;
 
     fn played(home: ClubId, away: ClubId, goals: (u8, u8)) -> Fixture {
-        Fixture { competition: 1, round: 1, week: 1, day: Day::Saturday, home, away, result: Some(Outcome::full_time(goals.0, goals.1)) }
+        Fixture { competition: 1, round: 1, week: 1, day: Day::Saturday, home, away, result: Some(Outcome::full_time(goals.0, goals.1)), must_have_winner: false }
     }
 
     fn table(fixtures: &[Fixture]) -> Vec<TableRow> {

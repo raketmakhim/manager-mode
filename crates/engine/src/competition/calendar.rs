@@ -88,7 +88,7 @@ mod tests {
 
     /// A fixture for club 1 at home in `week`, of some made-up cup.
     fn cup_match(week: u8) -> Fixture {
-        Fixture { competition: 900, round: 1, week, day: Day::Wednesday, home: 1, away: 2, result: None }
+        Fixture { competition: 900, round: 1, week, day: Day::Wednesday, home: 1, away: 2, result: None, must_have_winner: true }
     }
 
     #[test]

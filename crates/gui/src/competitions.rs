@@ -2,7 +2,7 @@
 use crate::leagues::league_label;
 use crate::stats::leaders;
 use eframe::egui::{self, RichText};
-use engine::{match_date, ClubId, Competition, CompetitionId, Fixture, PlayerId, PlayerStats, World};
+use engine::{match_date, standings, ClubId, Competition, CompetitionId, Fixture, PlayerId, PlayerStats, World, CHAMPIONS_LEAGUE_GROUP_ROUNDS};
 
 /// Shows one competition. `selected` is the pick; `None` means the league of `my_club`.
 pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, selected: &mut Option<CompetitionId>) {
@@ -24,6 +24,8 @@ pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, selected: &mut Opti
     ui.columns(2, |columns| {
         if competition.is_cup() {
             cup_ui(&mut columns[0], world, competition, my_club);
+        } else if competition.is_champions_league() {
+            champions_league_ui(&mut columns[0], world, competition, my_club);
         } else {
             table_ui(&mut columns[0], world, competition, my_club);
         }
@@ -98,21 +100,45 @@ fn cup_ui(ui: &mut egui::Ui, world: &World, cup: &Competition, my_club: ClubId) 
         ui.label("No round has been drawn yet.");
         return;
     }
-    let rounds = fixtures.iter().map(|f| f.round).max().unwrap_or(0);
+    egui::ScrollArea::vertical().show(ui, |ui| rounds_ui(ui, world, &fixtures, 1, my_club));
+}
+
+/// The Champions League: the table of each group, then the knockout rounds as they are drawn.
+fn champions_league_ui(ui: &mut egui::Ui, world: &World, cup: &Competition, my_club: ClubId) {
+    let fixtures: Vec<&Fixture> = world.fixtures.iter().filter(|f| f.competition == cup.id).collect();
     egui::ScrollArea::vertical().show(ui, |ui| {
-        for round in 1..=rounds {
-            let ties: Vec<&&Fixture> = fixtures.iter().filter(|f| f.round == round).collect();
-            let Some(first) = ties.first() else { continue };
-            ui.label(RichText::new(format!("Round {round} · {}", match_date(world.year, first.week, first.day))).strong());
-            egui::Grid::new(("cup_round", round)).striped(true).min_col_width(160.0).show(ui, |ui| {
-                for f in ties {
-                    ui.label(club_text(world, f.home, my_club));
-                    ui.label(f.result_text());
-                    ui.label(club_text(world, f.away, my_club));
+        for (g, group) in cup.groups().iter().enumerate() {
+            ui.label(RichText::new(format!("Group {}", (b'A' + g as u8) as char)).strong());
+            egui::Grid::new(("group", g)).striped(true).min_col_width(34.0).show(ui, |ui| {
+                for row in standings(group, &fixtures) {
+                    ui.label(club_text(world, row.club, my_club));
+                    for n in [row.played as i32, row.won as i32, row.drawn as i32, row.lost as i32, row.goal_difference(), row.points as i32] {
+                        ui.label(n.to_string());
+                    }
                     ui.end_row();
                 }
             });
-            ui.add_space(8.0);
+            ui.add_space(6.0);
         }
+        rounds_ui(ui, world, &fixtures, CHAMPIONS_LEAGUE_GROUP_ROUNDS + 1, my_club);
     });
+}
+
+/// Every drawn round from `first_round` on: its date and its matches.
+fn rounds_ui(ui: &mut egui::Ui, world: &World, fixtures: &[&Fixture], first_round: u8, my_club: ClubId) {
+    let last_round = fixtures.iter().map(|f| f.round).max().unwrap_or(0);
+    for round in first_round..=last_round {
+        let ties: Vec<&&Fixture> = fixtures.iter().filter(|f| f.round == round).collect();
+        let Some(first) = ties.first() else { continue };
+        ui.label(RichText::new(format!("Round {round} · {}", match_date(world.year, first.week, first.day))).strong());
+        egui::Grid::new(("cup_round", round)).striped(true).min_col_width(160.0).show(ui, |ui| {
+            for f in ties {
+                ui.label(club_text(world, f.home, my_club));
+                ui.label(f.result_text());
+                ui.label(club_text(world, f.away, my_club));
+                ui.end_row();
+            }
+        });
+        ui.add_space(8.0);
+    }
 }

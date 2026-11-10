@@ -43,6 +43,7 @@ pub fn round_robin(competition: CompetitionId, clubs: &[ClubId]) -> Vec<Fixture>
         home: clubs[home],
         away: clubs[away],
         result: None,
+        must_have_winner: false,
     })
     .collect()
 }

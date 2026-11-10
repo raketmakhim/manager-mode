@@ -3,7 +3,7 @@ use crate::attrs::Attr;
 use super::Competition;
 use crate::fitness::FitnessSettings;
 use crate::lineup::{rating_at, Selection};
-use crate::model::{ClubId, Player, Position, World};
+use crate::model::{ClubId, Fixture, Player, Position, World};
 use crate::rng::Rng;
 use crate::sim::{simulate, LiveMatch, MatchInput, MatchModel, MatchPlayer, MatchReport, MatchTeam, AVERAGE_AGGRESSION, DEFAULT_SHOT_BASED_PARTS};
 
@@ -18,7 +18,7 @@ impl World {
         self.rest_for(index);
         let f = &self.fixtures[index];
         let competition = &self.competitions[&f.competition];
-        let input = self.match_input(f.home, f.away, competition, None);
+        let input = self.match_input(f, competition, None);
         let report = simulate(competition.rules.model, &input, rng);
         self.store_report(index, report);
     }
@@ -40,7 +40,7 @@ impl World {
         for index in todo {
             self.play_fixture(index, rng);
         }
-        self.advance_cups(rng);
+        self.advance_competitions(rng);
     }
 
     /// Plays every match that is left, week by week, so cup rounds still get drawn in order.
@@ -56,7 +56,7 @@ impl World {
     pub fn play_next_match(&mut self, club: ClubId, rng: &mut Rng) -> Option<usize> {
         let next = self.play_up_to_next_match(club, rng)?;
         self.play_fixture(next, rng);
-        self.advance_cups(rng);
+        self.advance_competitions(rng);
         Some(next)
     }
 
@@ -87,22 +87,23 @@ impl World {
     pub fn start_live_match(&self, index: usize, club: ClubId, rng: &mut Rng) -> Option<LiveMatch> {
         let f = &self.fixtures[index];
         let competition = &self.competitions[&f.competition];
-        (competition.rules.model == MatchModel::ShotBased).then(|| LiveMatch::new(&self.match_input(f.home, f.away, competition, Some(club)), DEFAULT_SHOT_BASED_PARTS, [f.home == club, f.away == club], rng))
+        (competition.rules.model == MatchModel::ShotBased).then(|| LiveMatch::new(&self.match_input(f, competition, Some(club)), DEFAULT_SHOT_BASED_PARTS, [f.home == club, f.away == club], rng))
     }
 
     /// Plays out whatever is left of a live match, stores its result and draws any cup round that this completes.
     pub fn finish_live_match(&mut self, index: usize, live: LiveMatch, rng: &mut Rng) {
         let report = live.into_report(rng);
         self.store_report(index, report);
-        self.advance_cups(rng);
+        self.advance_competitions(rng);
     }
 
     /// What a match model needs to know about the two clubs: their lineups, each player rated in his slot.
     ///
     /// `user_club` is the club whose lineup the user may rearrange during the match, if any: its starters carry their rating
     /// in every position (about 20% of a season's simulation time if everyone's did, and only the user changes positions).
-    pub fn match_input(&self, home: ClubId, away: ClubId, competition: &Competition, user_club: Option<ClubId>) -> MatchInput {
-        MatchInput { home: self.match_team(home, user_club == Some(home)), away: self.match_team(away, user_club == Some(away)), must_have_winner: competition.is_cup(), max_substitutions: competition.rules.substitutions }
+    pub fn match_input(&self, fixture: &Fixture, competition: &Competition, user_club: Option<ClubId>) -> MatchInput {
+        let (home, away) = (fixture.home, fixture.away);
+        MatchInput { home: self.match_team(home, user_club == Some(home)), away: self.match_team(away, user_club == Some(away)), must_have_winner: fixture.must_have_winner, max_substitutions: competition.rules.substitutions }
     }
 
     /// The club's lineup and bench as the match models see them. An empty place is a player with id 0 and rating 0.

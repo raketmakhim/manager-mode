@@ -65,11 +65,13 @@ impl World {
         if !self.season_finished() {
             return None;
         }
+        let entrants = self.champions_league_entrants(); // from this season's tables, before the divisions change
         let moves = self.promote_and_relegate();
         self.year += 1;
         self.fixtures.clear();
-        self.competitions.retain(|_, c| !c.is_cup()); // cups are rebuilt from the new league lists
+        self.competitions.retain(|_, c| !c.is_cup() && !c.is_champions_league()); // rebuilt from the new league lists
         self.start_season(rng);
+        self.start_champions_league(&entrants, rng);
         Some(moves)
     }
 }

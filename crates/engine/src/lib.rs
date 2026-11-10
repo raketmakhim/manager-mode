@@ -1,7 +1,7 @@
 //! Game logic. No UI code here.
 //!
 //! - `attrs`: the player attributes (`Attr`, `Attrs`) and which ones outfield players and keepers have.
-//! - `competition`: leagues and cups as lists of stages, schedules and the weekly match limit.
+//! - `competition`: leagues, cups and the Champions League as lists of stages, schedules and the weekly match limit.
 //! - `development`: how the user's players change away from their real careers: match XP and levels (`ExperienceModel`) and the summer's ageing (`AgeingModel`).
 //! - `fitness`: how playing tires players and rest brings them back between matches.
 //! - `history`: reading real player history out of history.db.
@@ -37,7 +37,7 @@ mod testing;
 
 pub use attrs::{Attr, Attrs, KEEPER, OUTFIELD};
 pub use competition::{
-    draw_round, match_date, round_robin, standings, ClubMove, Competition, Entry, Format, Rules, Stage, TableRow,
+    draw_round, match_date, round_robin, standings, ClubMove, CHAMPIONS_LEAGUE_GROUP_ROUNDS, Competition, Entry, Format, Rules, Stage, TableRow,
     TOP_FIVE_LEAGUES,
 };
 pub use history::{career, edition_label, player_name, search, season_label, season_name, Hit, Snapshot};

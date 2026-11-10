@@ -35,6 +35,10 @@ pub struct Career {
     window: Option<Window>,
     /// Seeded when the career starts; every simulated match draws from it.
     rng: Rng,
+    /// New career: put your club in the Champions League even if it would not qualify.
+    join_champions_league: bool,
+    /// Whether the club, picked in the new-career form, qualifies for the first season's Champions League by strength.
+    qualifies: Option<(ClubId, bool)>,
     /// The result of the last match you played, for the line next to the button.
     last_played: Option<String>,
     error: Option<String>,
@@ -43,7 +47,7 @@ pub struct Career {
 impl Career {
     pub fn new(conn: &Connection) -> Self {
         let editions = editions(conn).unwrap_or_default();
-        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, history: None, squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), live: None, window: None, rng: Rng::new(0), last_played: None, error: None }
+        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, history: None, squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), live: None, window: None, rng: Rng::new(0), join_champions_league: false, qualifies: None, last_played: None, error: None }
     }
 
     /// Loads the picked edition and selects the first league and club.
@@ -74,6 +78,12 @@ impl Career {
         self.competition = None;
         self.view = View::Fixtures;
         world.start_season(&mut self.rng);
+        // The first season has no tables to qualify from: the strongest clubs of each country go in.
+        let mut entrants = world.champions_league_entrants_by_strength();
+        if self.join_champions_league || self.qualifies == Some((club, true)) {
+            world.place_in_champions_league(&mut entrants, club);
+        }
+        world.start_champions_league(&entrants, &mut self.rng);
         world.plan_retirements(&mut self.rng);
         self.history = Some(History::new(world, club, season_name(world.year)));
         self.squad = squad::State::default();
@@ -124,7 +134,7 @@ impl Career {
             }
             None => {
                 world.play_fixture(index, &mut self.rng);
-                world.advance_cups(&mut self.rng);
+                world.advance_competitions(&mut self.rng);
                 self.last_played = Some(Self::result_text(world, index));
             }
         }
@@ -267,6 +277,17 @@ impl Career {
                 }
             });
         });
+        if let Some(club) = self.club {
+            if self.qualifies.map(|(c, _)| c) != Some(club) {
+                self.qualifies = Some((club, world.champions_league_entrants_by_strength().contains(&club)));
+            }
+            ui.add_space(4.0);
+            if self.qualifies == Some((club, true)) {
+                ui.label("Your club is strong enough for this season's Champions League.");
+            } else {
+                ui.checkbox(&mut self.join_champions_league, "Put your club in this season's Champions League (it takes the weakest club's place)");
+            }
+        }
         ui.add_space(8.0);
         if ui.add_enabled(self.club.is_some(), egui::Button::new("Start career")).clicked() {
             self.start();

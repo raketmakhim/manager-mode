@@ -2,6 +2,7 @@
 //!
 //! - `pairing`: who plays whom in a league, as a pure function (`round_robin`).
 //! - `knockout`: cups, drawn round by round (`draw_round`, `World::advance_cups`).
+//! - `european`: the Champions League (places per country, qualifiers, groups, two-legged knockout rounds).
 //! - `play`: playing fixtures one match, one week or up to a club's next match.
 //! - `standings`: league tables from results (`standings`, `World::table`).
 //! - `season`: the end of a season (promotion and relegation) and the start of the next.
@@ -9,6 +10,7 @@
 //!
 //! Design and reasons: `research/engineering/competition-design.md`.
 mod calendar;
+mod european;
 mod knockout;
 mod pairing;
 mod play;
@@ -16,6 +18,7 @@ mod season;
 mod standings;
 
 pub use calendar::match_date;
+pub use european::CHAMPIONS_LEAGUE_GROUP_ROUNDS;
 pub use knockout::draw_round;
 pub use pairing::round_robin;
 pub use season::ClubMove;
@@ -104,11 +107,17 @@ pub struct Stage {
     pub entry: Entry,
 }
 
-/// The shape of a stage. League phase and groups are added when a competition needs them.
+/// The shape of a stage. A league phase is added when a competition needs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     /// Single-leg ties; the loser is out. Extra time and penalties settle a draw.
     Knockout,
+
+    /// Small groups, each a double round-robin (four clubs, six matchdays).
+    Groups,
+
+    /// Ties over two legs, the loser on goals over both is out; the last round is a single match.
+    TwoLeggedKnockout,
 
     /// Every club plays every other home and away.
     RoundRobin,
@@ -119,6 +128,8 @@ pub enum Format {
 pub enum Entry {
     /// Every club of the competition.
     AllClubs,
+    /// The best two clubs of each group of the stage before.
+    GroupQualifiers,
 }
 
 impl World {

@@ -102,6 +102,7 @@ impl World {
                 home,
                 away,
                 result: None,
+                must_have_winner: true,
             }));
         }
     }
