@@ -41,7 +41,8 @@ pub struct PlayerStats {
 const CLEAN_SHEET_MINUTES: u16 = 60;
 
 impl PlayerStats {
-    fn add(&mut self, o: &PlayerStats) {
+    /// Adds another set of stats to these.
+    pub fn add(&mut self, o: &PlayerStats) {
         self.appearances += o.appearances;
         self.minutes += o.minutes;
         self.goals += o.goals;
@@ -228,6 +229,18 @@ impl World {
         totals.into_iter().collect()
     }
 
+    /// A player's totals for each season he has stats in, over every competition, oldest season first.
+    pub fn season_totals(&self, player: PlayerId) -> Vec<(u16, PlayerStats)> {
+        let mut seasons: Vec<(u16, PlayerStats)> = vec![];
+        for (&(_, year, _), s) in self.stats.range((player, 0, 0)..=(player, u16::MAX, CompetitionId::MAX)) {
+            match seasons.last_mut() {
+                Some((last, total)) if *last == year => total.add(s),
+                _ => seasons.push((year, *s)),
+            }
+        }
+        seasons
+    }
+
     /// A player's totals this season over every competition.
     pub fn season_stats(&self, player: PlayerId) -> PlayerStats {
         let mut total = PlayerStats::default();
@@ -311,6 +324,19 @@ mod tests {
         assert_eq!(w.season_stats(12).saves, 3);
         assert_eq!(w.season_stats(12).appearances, 3);
         assert_eq!(w.season_stats(999), PlayerStats::default());
+    }
+
+    #[test]
+    fn a_players_seasons_are_listed_oldest_first_with_every_competition_of_a_season_added_up() {
+        let mut w = World::new(0, 2015);
+        let some = |goals| PlayerStats { goals, appearances: 1, ..PlayerStats::default() };
+        w.stats.insert((5, 2015, 2), some(3));
+        w.stats.insert((5, 2014, 9), some(1));
+        w.stats.insert((5, 2014, 1), some(2));
+        w.stats.insert((6, 2014, 1), some(40)); // someone else
+        let seasons = w.season_totals(5);
+        assert_eq!(seasons.iter().map(|(year, s)| (*year, s.goals, s.appearances)).collect::<Vec<_>>(), [(2014, 3, 2), (2015, 3, 1)]);
+        assert!(w.season_totals(999).is_empty());
     }
 
     #[test]

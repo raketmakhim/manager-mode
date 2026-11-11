@@ -107,7 +107,7 @@ fn xp_bar(ui: &mut egui::Ui, xp: u16) {
     ui.add(egui::ProgressBar::new(xp as f32 / XP_PER_LEVEL as f32).desired_width(80.0).text(format!("{xp}/{XP_PER_LEVEL}")));
 }
 
-/// A player's page: who he is, his overall and XP, what he did this season and every attribute with how it changed
+/// A player's page: who he is, his overall and XP, his stats by season, his honours and every attribute with how it changed
 /// since the start of this season, and his overall over the seasons. True when Back is pressed.
 fn player_page(ui: &mut egui::Ui, world: &World, p: &Player, history: &History) -> bool {
     let then = history.season_start.get(&p.id);
@@ -135,16 +135,8 @@ fn player_page(ui: &mut egui::Ui, world: &World, p: &Player, history: &History) 
         xp_bar(ui, p.xp);
         ui.label(format!("(last match {})", world.last_match_xp.get(&p.id).map_or("-".to_string(), |xp| xp.to_string())));
     });
-    let stats = world.season_stats(p.id);
-    ui.label(format!(
-        "This season: {} apps, {} goals, {} assists, rating {}, {} XP",
-        stats.appearances,
-        stats.goals,
-        stats.assists,
-        stats.average_rating().map_or("-".to_string(), |r| format!("{r:.1}")),
-        stats.xp
-    ));
     ui.label(overall_track_text(&history.overall_by_season(p.id)));
+    crate::player_stats::ui(ui, world, p.id);
     crate::honours::ui(ui, world, p.id);
     ui.label(format!("Attribute changes are since the start of {}.", history.season()));
     ui.separator();

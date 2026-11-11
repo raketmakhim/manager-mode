@@ -7,6 +7,7 @@ mod fixtures;
 mod honours;
 mod leagues;
 mod live;
+mod player_stats;
 mod lineup;
 mod scout;
 mod squad;
