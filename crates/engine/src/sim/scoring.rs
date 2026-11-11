@@ -33,7 +33,7 @@ pub const DEFAULT_SCORING_MODEL: ScoringModel = ScoringModel::StarWeighted;
 // `research/game-features/simulation-balance.md`. Rerun the simtool after changing any of them.
 
 /// Chance a shot on target is a goal, for a shooter with the reference finishing against a keeper of the reference rating.
-const GOAL_PER_SHOT_ON_TARGET: f64 = 0.303;
+const GOAL_PER_SHOT_ON_TARGET: f64 = 0.316;
 /// The finishing and goalkeeper rating that count as average.
 const REFERENCE_RATING: f64 = 70.0;
 /// Each point of the shooter's finishing above the reference changes that chance by this share (exponent), within
@@ -85,7 +85,32 @@ pub(super) fn assister(model: ScoringModel, players: &[MatchPlayer; 11], scorer:
     players.iter().any(|p| weight(p) > 0.0).then(|| pick(players, weight, MAX_ASSIST_SHARE, rng))
 }
 
-/// How likely a player is to take a shot: the shots per 90 minutes of his slot, raised by how well he finishes.
+/// The average finishing of a regular (overall 65 or more) of each position in FIFA 15. A player shoots more or less than
+/// his slot's average by how far his finishing is above or below this, so a centre-back is not held back for finishing
+/// like a centre-back: the slot's shots per 90 already count that.
+pub(super) fn typical_finishing(position: Position) -> f64 {
+    use Position::*;
+    match position {
+        Gk => 25.0,
+        Cb => 33.0,
+        Lb | Rb => 43.0,
+        Lwb | Rwb => 50.0,
+        Cdm => 47.0,
+        Cm => 57.0,
+        Lm | Rm => 62.0,
+        Cam => 64.0,
+        Lw | Rw => 64.0,
+        Cf => 69.0,
+        St => 71.0,
+    }
+}
+
+/// How far, in finishing points, a player may be from his slot's typical finishing and still change his share of the
+/// shots (a player whose finishing is missing in the data counts as his rating, far above a defender's).
+const FINISHING_GAP_LIMIT: f64 = 30.0;
+
+/// How likely a player is to take a shot: the shots per 90 minutes of his slot, raised by how much better than the slot's
+/// usual player he finishes.
 // The three line averages (defenders 0.48, midfielders 1.45, attackers 2.81) are real Premier League 2014/15 figures
 // (research/game-features/match-simulation-methods.md). The split inside the midfield and attack is our own guess,
 // chosen so a 4-4-2's midfield still averages 1.45: wide and attacking midfielders shoot about twice as often as
@@ -104,7 +129,10 @@ fn shot_weight(model: ScoringModel, p: &MatchPlayer) -> f64 {
     };
     match model {
         ScoringModel::Flat => per_90,
-        ScoringModel::StarWeighted => per_90 * (SHOTS_PER_FINISHING_POINT * p.finishing as f64).exp(),
+        ScoringModel::StarWeighted => {
+            let gap = (p.finishing as f64 - typical_finishing(p.position)).clamp(-FINISHING_GAP_LIMIT, FINISHING_GAP_LIMIT);
+            per_90 * (SHOTS_PER_FINISHING_POINT * gap).exp()
+        }
     }
 }
 
@@ -166,7 +194,8 @@ mod tests {
     #[test]
     fn forwards_take_far_more_shots_than_defenders_in_every_model() {
         for &model in ScoringModel::ALL {
-            let team = MatchTeam::flat(70);
+            let mut team = MatchTeam::flat(70);
+            team.players.iter_mut().for_each(|p| p.finishing = typical_finishing(p.position) as u8); // a defender who finishes like a forward is not typical
             let mut rng = Rng::new(9);
             let (mut forwards, mut defenders) = (0, 0);
             for _ in 0..5000 {
@@ -179,6 +208,23 @@ mod tests {
             // Two forwards against four defenders.
             assert!(forwards / 2 > 3 * (defenders / 4), "{model:?}: {forwards} against {defenders}");
         }
+    }
+
+    #[test]
+    fn a_player_of_typical_finishing_shoots_as_often_as_his_slot_says_whatever_his_position() {
+        for &position in Position::ALL.iter().filter(|&&p| p != Position::Gk) {
+            let player = MatchPlayer { position, finishing: typical_finishing(position) as u8, ..MatchPlayer::empty(position) };
+            let flat = shot_weight(ScoringModel::Flat, &MatchPlayer { id: 1, ..player });
+            let star = shot_weight(ScoringModel::StarWeighted, &MatchPlayer { id: 1, ..player });
+            assert!((flat - star).abs() < 1e-9, "{position:?}: {flat} against {star}");
+        }
+    }
+
+    #[test]
+    fn a_better_finisher_shoots_more_than_a_worse_one_of_the_same_position() {
+        let at = |finishing| shot_weight(ScoringModel::StarWeighted, &MatchPlayer { id: 1, position: Position::Cb, finishing, ..MatchPlayer::empty(Position::Cb) });
+        assert!(at(60) > at(40) && at(40) > at(25));
+        assert_eq!(at(99), at(33 + FINISHING_GAP_LIMIT as u8), "the gap is limited");
     }
 
     #[test]

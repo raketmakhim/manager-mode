@@ -715,9 +715,14 @@ mod tests {
     fn forwards_score_far_more_than_defenders() {
         let flat = MatchTeam::flat(70);
         let line_of = |id: u32| flat.players.iter().chain(&flat.bench).find(|p| p.id == id).expect("a player of the flat team").position.line();
+        // Typical finishers: a defender who finishes like a forward is not typical.
+        let mut typical = input(70, 70, false);
+        for p in typical.home.players.iter_mut().chain(&mut typical.home.bench).chain(&mut typical.away.players).chain(&mut typical.away.bench) {
+            p.finishing = super::scoring::typical_finishing(p.position) as u8;
+        }
         let (mut attackers, mut defenders) = (0, 0);
         for seed in 0..500 {
-            for e in play(&input(70, 70, false), seed).1.events {
+            for e in play(&typical, seed).1.events {
                 if let Event::Goal { scorer, .. } = e {
                     match line_of(scorer) {
                         Line::Attack => attackers += 1,
