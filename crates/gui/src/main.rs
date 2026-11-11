@@ -1,8 +1,10 @@
 //! Manager Mode window. Tabs: Career (new career, your club's fixtures, squad and competitions) and Player scout (real player history).
 //! Usage: gui [history.db]
+mod awards;
 mod career;
 mod competitions;
 mod fixtures;
+mod honours;
 mod leagues;
 mod live;
 mod lineup;

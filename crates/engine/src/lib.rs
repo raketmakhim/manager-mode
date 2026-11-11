@@ -1,10 +1,12 @@
 //! Game logic. No UI code here.
 //!
 //! - `attrs`: the player attributes (`Attr`, `Attrs`) and which ones outfield players and keepers have.
+//! - `awards`: the season's best players, best eleven and top scorers, worked out from the stats (`World::awards`).
 //! - `competition`: leagues, cups and the Champions League as lists of stages, schedules and the weekly match limit.
 //! - `development`: how the user's players change away from their real careers: match XP and levels (`ExperienceModel`) and the summer's ageing (`AgeingModel`).
 //! - `fitness`: how playing tires players and rest brings them back between matches.
 //! - `history`: reading real player history out of history.db.
+//! - `honours`: the titles and season awards players have won, kept for their pages.
 //! - `lineup`: formations, and picking the best eleven for one.
 //! - `model`: the live game state (`World`, `Club`, `Player`...).
 //! - `outcome`: the result of a played match (full time, extra time, shootout).
@@ -17,10 +19,12 @@
 //! - `stats`: what each player did, added up from the events of the matches played.
 //! - `transfer`: players changing clubs in the summer (`Transfer`, `Window`); the real moves come from the data (`source::plan_transfers`).
 mod attrs;
+mod awards;
 mod competition;
 mod development;
 mod fitness;
 mod history;
+mod honours;
 mod lineup;
 mod model;
 mod outcome;
@@ -36,6 +40,8 @@ mod transfer;
 mod testing;
 
 pub use attrs::{Attr, Attrs, KEEPER, OUTFIELD};
+pub use awards::{Awards, Contender};
+pub use honours::{Honour, HonourKind};
 pub use competition::{
     draw_round, match_date, round_robin, standings, ClubMove, CHAMPIONS_LEAGUE_GROUP_ROUNDS, Competition, Entry, Format, Rules, Stage, TableRow,
     TOP_FIVE_LEAGUES,

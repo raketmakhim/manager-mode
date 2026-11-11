@@ -239,10 +239,12 @@ impl World {
         self.fixtures.extend(new);
     }
 
-    /// Draws the next round of every domestic cup and of the Champions League.
+    /// Draws the next round of every domestic cup and of the Champions League, then gives the title to the winners of any
+    /// competition that has just finished.
     pub fn advance_competitions(&mut self, rng: &mut Rng) {
         self.advance_cups(rng);
         self.advance_champions_league(rng);
+        self.award_titles();
     }
 }
 
@@ -453,7 +455,16 @@ mod tests {
         assert!(w.season_finished() && w.calendar_problems().is_empty(), "{:?}", w.calendar_problems());
         let rounds = w.fixtures.iter().filter(|f| f.competition == cl).map(|f| f.round).max();
         assert_eq!(rounds, Some(13), "six group matchdays, three two-legged rounds and a final");
+        let titles = |competition| w.honours.iter().filter(|h| h.competition == Some(competition) && h.kind == crate::HonourKind::Title).count();
+        assert!(titles(cl) > 0, "the winners of the final got the title");
+        let missing: Vec<_> = w.competitions.values().filter(|c| c.is_league() && c.level == Some(1) && c.clubs.len() >= 2 && titles(c.id) == 0).map(|c| (c.name.clone(), c.country.clone(), c.clubs.len())).collect();
+        assert!(missing.is_empty(), "no title for {missing:?}");
+        let cups_without: Vec<_> = w.competitions.values().filter(|c| c.is_cup() && c.clubs.len() >= 2 && titles(c.id) == 0).map(|c| c.name.clone()).collect();
+        assert!(cups_without.is_empty(), "no cup winner for {cups_without:?}");
         w.start_next_season(&mut rng).expect("the season is over");
+        let recorded = |kind| w.honours.iter().filter(|h| h.season == 2014 && h.kind == kind).count();
+        assert_eq!(recorded(crate::HonourKind::BallonDor), 1, "the season's awards were recorded as it ended");
+        assert!(recorded(crate::HonourKind::BestEleven) >= 11);
         assert_eq!(w.competitions.values().filter(|c| c.is_champions_league()).count(), 1);
         assert!(w.calendar_problems().is_empty());
     }

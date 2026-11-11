@@ -20,6 +20,7 @@ This file holds decisions and milestones. How things work and why lives in `rese
 | Swappable models | Every engine that could be argued about is an enum with `ALL`, a `DEFAULT_*` and contract tests that run for every variant: match, scoring, discipline, substitution, fatigue, rating, experience, ageing, retirement |
 | Player progression | The user's club develops by our own rules (match XP levels, a summer ageing table, a real rise in the data is kept); everyone else follows the real change between editions (`advance_ratings`). After FC 24 other clubs need generated progression. `research/game-features/experience.md` |
 | Transfers, retirement, fitness | The real moves between editions are made each summer with a yes/no on deals involving your club; retirement is decided at the start of a season and made at its end; fitness carries between matches. `transfers.md`, `retirement.md`, `fitness.md` |
+| Awards | Worked out from the season's stats when asked (`awards.rs`), so every past season has them: a score per player (rating above an ordinary match, goals weighted by line, assists, clean sheets, player of the match; Champions League counts 1.5x; every player of a first-division champion gets +10, of the Champions League winner +15 and of a cup or league cup winner +5, recorded in his stats when it is decided), then best player, best young player (21 or younger), best of each line, a 4-3-3 best eleven, top scorers and assist leaders, for all competitions (the Ballon d'Or) or one (a cup only has scorers and assist leaders). Titles and each season's awards are kept as honours (`honours.rs`) and listed on the player's page. The weights are guesses, not researched |
 | Saves | JSON via `serde`, one file per save (not built) |
 | Randomness | Our own seeded `Rng` (SplitMix64), so a seed gives the same numbers everywhere; every sim takes an explicit `&mut Rng`, no global state |
 
@@ -31,6 +32,7 @@ In `crates/engine/src/model.rs`; everything points at everything else by id.
 - **Club**: id, name, league, squad, budget, formation and selection
 - **Competition**, **Fixture** (competition, round, week, day, home, away, result), **World** (the whole game state: edition, year, competitions, clubs, players, fixtures, stats, settings)
 - Stats are totals per (player, season, competition), rebuilt from match reports.
+- Honours (titles won and each season's awards) are a list on the world, because competitions are rebuilt each season and players move clubs; the awards themselves are worked out from the stats.
 - Still to add: current week as a calendar you move through, transfer list, the user's club in the world.
 
 ## Milestones

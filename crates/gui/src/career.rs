@@ -3,7 +3,7 @@
 use crate::leagues::{league_label, sorted_leagues};
 use crate::squad::{self, History};
 use crate::lineup;
-use crate::{competitions, fixtures, live, stats, transfers, RED};
+use crate::{awards, competitions, fixtures, live, stats, transfers, RED};
 use eframe::egui;
 use engine::{advance_ratings, CareerStatus, edition_label, editions, load_edition, plan_transfers, season_label, season_name, ClubId, CompetitionId, Connection, Rng, Side, Window, World};
 
@@ -29,6 +29,7 @@ pub struct Career {
     squad: squad::State,
     lineup: lineup::State,
     stats: stats::State,
+    awards: awards::State,
     /// Your match while it is being watched; the rest of the screen waits.
     live: Option<live::State>,
     /// The summer's transfers while you decide on the ones that involve your club; the season waits.
@@ -47,7 +48,7 @@ pub struct Career {
 impl Career {
     pub fn new(conn: &Connection) -> Self {
         let editions = editions(conn).unwrap_or_default();
-        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, history: None, squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), live: None, window: None, rng: Rng::new(0), join_champions_league: false, qualifies: None, last_played: None, error: None }
+        Career { edition: editions.first().copied().unwrap_or(15), editions, world: None, league: None, club: None, started: false, view: View::Fixtures, competition: None, history: None, squad: squad::State::default(), lineup: lineup::State::default(), stats: stats::State::default(), awards: awards::State::default(), live: None, window: None, rng: Rng::new(0), join_champions_league: false, qualifies: None, last_played: None, error: None }
     }
 
     /// Loads the picked edition and selects the first league and club.
@@ -347,6 +348,7 @@ impl Career {
             ui.selectable_value(&mut self.view, View::Lineup, "Lineup");
             ui.selectable_value(&mut self.view, View::Competitions, "Competitions");
             ui.selectable_value(&mut self.view, View::Stats, "Stats");
+            ui.selectable_value(&mut self.view, View::Awards, "Awards");
         });
         ui.add_space(6.0);
         match self.view {
@@ -363,6 +365,7 @@ impl Career {
             }
             View::Competitions => competitions::ui(ui, world, club_id, &mut self.competition),
             View::Stats => stats::ui(ui, world, club_id, &mut self.stats),
+            View::Awards => awards::ui(ui, world, club_id, &mut self.awards),
         }
     }
 }
@@ -382,6 +385,7 @@ enum View {
     Fixtures,
     Competitions,
     Stats,
+    Awards,
     Squad,
     Lineup,
 }

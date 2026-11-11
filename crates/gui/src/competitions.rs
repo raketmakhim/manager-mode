@@ -1,5 +1,5 @@
 //! The Competitions view: pick a league or cup and see its table or its rounds.
-use crate::leagues::league_label;
+use crate::leagues::{competition_list, league_label};
 use crate::stats::leaders;
 use eframe::egui::{self, RichText};
 use engine::{match_date, standings, ClubId, Competition, CompetitionId, Fixture, PlayerId, PlayerStats, World, CHAMPIONS_LEAGUE_GROUP_ROUNDS};
@@ -9,15 +9,10 @@ pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, selected: &mut Opti
     let current = selected.unwrap_or(world.clubs[&my_club].league);
     let Some(competition) = world.competitions.get(&current) else { return };
 
-    let mut all: Vec<&Competition> = world.competitions.values().filter(|c| c.clubs.len() >= 2).collect();
-    all.sort_by(|a, b| (&a.country, a.is_cup(), &a.name).cmp(&(&b.country, b.is_cup(), &b.name)));
+    let all: Vec<&Competition> = world.competitions.values().filter(|c| c.clubs.len() >= 2).collect();
     ui.horizontal(|ui| {
         ui.label("Competition:");
-        egui::ComboBox::from_id_salt("competition").width(320.0).selected_text(league_label(competition)).show_ui(ui, |ui| {
-            for c in all {
-                ui.selectable_value(selected, Some(c.id), league_label(c));
-            }
-        });
+        egui::ComboBox::from_id_salt("competition").width(320.0).selected_text(league_label(competition)).show_ui(ui, |ui| competition_list(ui, selected, &all));
     });
     ui.add_space(6.0);
 

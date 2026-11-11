@@ -4,10 +4,11 @@
 use crate::fitness::FitnessSettings;
 use crate::attrs::Attrs;
 use crate::competition::Competition;
+use crate::honours::Honour;
 use crate::lineup::{Formation, Selection};
 use crate::outcome::{Outcome, Side};
 use crate::stats::PlayerStats;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Same number as `player_id` in history.db, so we can look up a player's real future.
 pub type PlayerId = u32;
@@ -263,6 +264,10 @@ pub struct World {
     pub last_match_xp: BTreeMap<PlayerId, u8>,
     /// The numbers behind tiredness and rest between matches; change them to tune (`fitness`).
     pub fitness_settings: FitnessSettings,
+    /// The (season start year, competition) pairs whose winners have been given their title (`World::award_titles`).
+    pub titles_awarded: BTreeSet<(u16, CompetitionId)>,
+    /// The titles and season awards players have won, oldest first (`honours`).
+    pub honours: Vec<Honour>,
 }
 
 impl World {
@@ -278,6 +283,8 @@ impl World {
             stats: BTreeMap::new(),
             last_match_xp: BTreeMap::new(),
             fitness_settings: FitnessSettings::default(),
+            titles_awarded: BTreeSet::new(),
+            honours: vec![],
         }
     }
 }

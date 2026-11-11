@@ -145,6 +145,7 @@ fn player_page(ui: &mut egui::Ui, world: &World, p: &Player, history: &History) 
         stats.xp
     ));
     ui.label(overall_track_text(&history.overall_by_season(p.id)));
+    crate::honours::ui(ui, world, p.id);
     ui.label(format!("Attribute changes are since the start of {}.", history.season()));
     ui.separator();
     let Some(then) = then.map(|w| &w.attrs) else {

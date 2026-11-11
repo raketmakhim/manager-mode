@@ -1,5 +1,5 @@
 //! The Stats view: the leading players of the career so far, all time or one season, in every competition or one.
-use crate::leagues::league_label;
+use crate::leagues::{competition_list, league_label};
 use eframe::egui::{self, RichText};
 use engine::{season_name, ClubId, CompetitionId, PlayerId, PlayerStats, World};
 use std::collections::BTreeSet;
@@ -96,9 +96,8 @@ pub fn ui(ui: &mut egui::Ui, world: &World, my_club: ClubId, state: &mut State) 
         let competition_text = state.competition.and_then(|c| world.competitions.get(&c)).map_or("All competitions".to_string(), league_label);
         egui::ComboBox::from_id_salt("stats_competition").width(260.0).selected_text(competition_text).show_ui(ui, |ui| {
             ui.selectable_value(&mut state.competition, None, "All competitions");
-            for c in competitions.iter().filter_map(|c| world.competitions.get(c)) {
-                ui.selectable_value(&mut state.competition, Some(c.id), league_label(c));
-            }
+            let listed: Vec<&engine::Competition> = competitions.iter().filter_map(|c| world.competitions.get(c)).collect();
+            competition_list(ui, &mut state.competition, &listed);
         });
         ui.label("Ranked by:");
         egui::ComboBox::from_id_salt("stats_rank").selected_text(state.rank.label()).show_ui(ui, |ui| {

@@ -65,6 +65,7 @@ impl World {
         if !self.season_finished() {
             return None;
         }
+        self.record_honours(); // while this season's stats and competitions are still here
         let entrants = self.champions_league_entrants(); // from this season's tables, before the divisions change
         let moves = self.promote_and_relegate();
         self.year += 1;
